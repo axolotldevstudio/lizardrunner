@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Lizard Run</title>
+  <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+<div id="game-wrapper">
+
+  <!-- ── START SCREEN ─────────────────────────────────── -->
+  <div id="start-screen">
+    <div id="start-content">
+
+      <div class="auth-panel">
+        <div class="auth-logged-out">
+          <div id="auth-forms">
+            <div id="auth-toggle-btns">
+              <button class="auth-tab active" data-form="login">Login</button>
+              <button class="auth-tab" data-form="register">Register</button>
+            </div>
+            <div id="form-login" class="auth-form">
+              <input type="email" id="login-email" placeholder="Email" autocomplete="email"/>
+              <input type="password" id="login-password" placeholder="Password" autocomplete="current-password"/>
+              <button class="auth-submit" onclick="handleLogin('start')">Log in</button>
+              <p class="auth-error hidden" id="login-error"></p>
+            </div>
+            <div id="form-register" class="auth-form hidden">
+              <input type="text" id="reg-username" placeholder="Username" maxlength="20"/>
+              <input type="email" id="reg-email" placeholder="Email"/>
+              <input type="password" id="reg-password" placeholder="Password (min 6 chars)"/>
+              <button class="auth-submit" onclick="handleRegister('start')">Create account</button>
+              <p class="auth-error hidden" id="reg-error"></p>
+            </div>
+          </div>
+        </div>
+        <div class="auth-logged-in hidden">
+          <span class="auth-greeting">👤 <span class="auth-username"></span></span>
+          <button class="auth-logout-btn" onclick="handleLogout()">Log out</button>
+        </div>
+      </div>
+
+      <div id="logo-lizard">🦎</div>
+      <h1>LIZARD RUN</h1>
+      <p class="subtitle">thermoregulate or die</p>
+
+      <div class="start-instructions">c
+        <span>↑ ↓ switch lane</span>
+        <span>→ speed burst</span>
+        <span>Space hide in burrow</span>
+      </div>
+
+      <div class="start-meta">
+        Keep your temp in the <strong class="green-zone">green zone</strong> to survive
+      </div>
+
+      <div class="scales-display">🦎 <span id="start-scales">0</span> scales</div>
+
+      <div id="start-buttons">
+        <button id="start-btn">Play</button>
+        <button id="multiplayer-btn">🌍 Multiplayer</button>
+        <button id="store-btn">🛒 Store</button>
+      </div>
+
+      <button id="leaderboard-btn">🏆 Leaderboard</button>
+
+    </div>
+  </div>
+
+  <!-- ── MULTIPLAYER ───────────────────────────────────── -->
+  <div id="multiplayer-screen" class="hidden">
+    <div id="multiplayer-content">
+      <h2>Multiplayer</h2>
+      <p id="mp-status">Not connected</p>
+      <div id="mp-server-row">
+        <label for="mp-server">Server</label>
+        <input id="mp-server" type="text" value="https://your-oracle-server.example.com" />
+      </div>
+      <div id="mp-actions">
+        <button id="mp-connect-btn">Connect</button>
+        <button id="mp-find-btn">Find match</button>
+        <button id="mp-cancel-btn">Cancel</button>
+        <button id="mp-back-btn">Back</button>
+      </div>
+      <div id="mp-log"><strong>Match log</strong><div id="mp-log-list"></div></div>
+    </div>
+  </div>
+
+  <!-- ── STORE ─────────────────────────────────────────── -->
+  <div id="store-screen" class="hidden">
+    <div id="store-layout">
+      <div id="store-preview">
+        <canvas id="preview-canvas" width="200" height="160"></canvas>
+        <div id="preview-name">Classic</div>
+        <div id="store-bal">🦎 <span id="store-scales">0</span></div>
+      </div>
+      <div id="store-right">
+        <div id="store-header">
+          <div class="store-tabs">
+            <button class="tab-btn active" data-tab="skins">Skins</button>
+            <button class="tab-btn" data-tab="trails">Trails</button>
+            <button class="tab-btn" data-tab="hats">Hats</button>
+            <button class="tab-btn" data-tab="powerups">Perks</button>
+          </div>
+          <button id="store-close">✕ Back</button>
+        </div>
+        <div id="store-grid"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── GAME OVER ──────────────────────────────────────── -->
+  <div id="gameover-screen" class="hidden">
+    <div id="gameover-content">
+
+      <div class="auth-panel">
+        <div class="auth-logged-out">
+          <div id="auth-forms-go">
+            <div id="auth-toggle-btns-go">
+              <button class="auth-tab active" data-form="login-go">Login</button>
+              <button class="auth-tab" data-form="register-go">Register</button>
+            </div>
+            <div id="form-login-go" class="auth-form">
+              <input type="email" id="go-login-email" placeholder="Email"/>
+              <input type="password" id="go-login-password" placeholder="Password"/>
+              <button class="auth-submit" onclick="handleLogin('go')">Log in</button>
+              <p class="auth-error hidden" id="go-login-error"></p>
+            </div>
+            <div id="form-register-go" class="auth-form hidden">
+              <input type="text" id="go-reg-username" placeholder="Username"/>
+              <input type="email" id="go-reg-email" placeholder="Email"/>
+              <input type="password" id="go-reg-password" placeholder="Password"/>
+              <button class="auth-submit" onclick="handleRegister('go')">Create account</button>
+              <p class="auth-error hidden" id="go-reg-error"></p>
+            </div>
+          </div>
+        </div>
+        <div class="auth-logged-in hidden">
+          <span class="auth-greeting">👤 <span class="auth-username"></span></span>
+          <button class="auth-logout-btn" onclick="handleLogout()">Log out</button>
+        </div>
+      </div>
+
+      <div id="go-icon">💀</div>
+      <h2 id="go-title">Game Over</h2>
+      <p id="go-reason"></p>
+
+      <div class="go-stats">
+        <div class="go-stat">
+          <span class="go-stat-label">Score</span>
+          <span class="go-stat-val" id="go-score">—</span>
+        </div>
+        <div class="go-stat">
+          <span class="go-stat-label">Best</span>
+          <span class="go-stat-val green" id="go-best">—</span>
+        </div>
+        <div class="go-stat">
+          <span class="go-stat-label">Earned</span>
+          <span class="go-stat-val amber" id="go-earned">—</span>
+        </div>
+      </div>
+
+      <p id="go-lb-msg" class="hidden"></p>
+
+      <div id="go-buttons">
+        <button id="restart-btn">Play Again</button>
+        <button id="go-store-btn">🛒 Store</button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── LEADERBOARD ───────────────────────────────────── -->
+  <div id="leaderboard" class="hidden">
+    <div id="leaderboard-header">
+      <h2>🏆 Leaderboard</h2>
+      <button id="lb-close">✕</button>
+    </div>
+    <ol id="lb-list"></ol>
+  </div>
+
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+<script src="store.js"></script>
+<script type="module" src="firebase.js"></script>
+<script src="leaderboard.js"></script>
+<script src="multiplayer.js"></script>
+<script src="game.js"></script>
+
+<script>
+/* AUTH TABS */
+document.querySelectorAll('.auth-tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const isGo  = btn.closest('#auth-forms-go');
+    const group = isGo ? document.getElementById('auth-forms-go')
+                       : document.getElementById('auth-forms');
+    group.querySelectorAll('.auth-tab').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    group.querySelectorAll('.auth-form').forEach(f => f.classList.add('hidden'));
+    const target = group.querySelector(`#form-${btn.dataset.form}`);
+    if (target) target.classList.remove('hidden');
+  });
+});
+
+function showAuthError(id, msg) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.remove('hidden');
+  setTimeout(() => el.classList.add('hidden'), 4000);
+}
+
+async function handleLogin(ctx) {
+  const p   = ctx === 'go' ? 'go-' : '';
+  const err = ctx === 'go' ? 'go-login-error' : 'login-error';
+  try {
+    await window.fbLogin(
+      document.getElementById(p + 'login-email').value,
+      document.getElementById(p + 'login-password').value
+    );
+  } catch (e) { showAuthError(err, e.message); }
+}
+
+async function handleRegister(ctx) {
+  const p   = ctx === 'go' ? 'go-' : '';
+  const err = ctx === 'go' ? 'go-reg-error' : 'reg-error';
+  try {
+    await window.fbRegister(
+      document.getElementById(p + 'reg-email').value,
+      document.getElementById(p + 'reg-password').value,
+      document.getElementById(p + 'reg-username').value
+    );
+  } catch (e) { showAuthError(err, e.message); }
+}
+
+async function handleLogout() { await window.fbLogout(); }
+</script>
+</body>
+</html>
