@@ -56,7 +56,7 @@ async function connectMultiplayer() {
     return;
   }
   let serverUrl = getSelectedServerUrl();
-  
+
   if (!serverUrl) {
     setStatus('No server URL configured', 'error');
     return;
@@ -73,14 +73,14 @@ async function connectMultiplayer() {
     const idToken = await window.fbGetIdToken();
     if (idToken) authPayload.idToken = idToken;
   }
-  socket = io(serverUrl, {
-    transports: ['websocket'],
-    auth: authPayload,
-    reconnection: true,
-    reconnectionDelay: 1000,
-    reconnectionDelayMax: 5000,
-    reconnectionAttempts: 5
-  });
+ socket = io(serverUrl, {
+  transports: ['polling'],
+  auth: authPayload,
+  reconnection: true,
+  reconnectionDelay: 1000,
+  reconnectionDelayMax: 5000,
+  reconnectionAttempts: 5
+});
   if (window.multiplayer) {
     window.multiplayer.socket = socket;
   }
