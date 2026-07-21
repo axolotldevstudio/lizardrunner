@@ -75,7 +75,12 @@
       <p id="mp-status">Not connected</p>
       <div id="mp-server-row">
         <label for="mp-server">Server</label>
-        <input id="mp-server" type="text" value="https://your-oracle-server.example.com" />
+        <div id="mp-regions" class="region-buttons">
+          <button class="mp-region" data-region="us">US</button>
+          <button class="mp-region" data-region="eu">EU</button>
+          <button class="mp-region" data-region="apac">APAC</button>
+        </div>
+        <input id="mp-server" type="text" value="https://lizardrunnerserver.onrender.com" class="hidden" />
       </div>
       <div id="mp-actions">
         <button id="mp-connect-btn">Connect</button>

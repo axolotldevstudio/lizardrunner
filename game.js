@@ -17,7 +17,9 @@ let paused = false;
 let mpServerState = null;
 let mpPlayers = {};
 let mpMyId = null;
+let mpMatchId = null;
 let mpPredatorAlert = '';
+let mpObstacles = [];
 
 new p5(function(p) {
 
@@ -87,6 +89,7 @@ new p5(function(p) {
       mpMatchId = payload.matchId;
       mpMyId = payload.myPlayerId || window.multiplayer?.playerId || window.multiplayer?.socket?.id || null;
       mpPlayers = {};
+      mpObstacles = [];
       multiplayerMode = true;
       multiplayerRunning = true;
       setTimeout(() => {
@@ -98,6 +101,7 @@ new p5(function(p) {
     window.onMultiplayerState = (state) => {
       if (!multiplayerRunning) return;
       mpPlayers = state.players || {};
+      mpObstacles = state.obstacles || [];
       if (mpMyId && mpPlayers[mpMyId] && tuatara) {
         const me = mpPlayers[mpMyId];
         score = Math.floor(me.score || 0);
@@ -118,9 +122,27 @@ new p5(function(p) {
       gameRunning = false;
       const winnerIds = result.winnerIds || [];
       const youWon = winnerIds.includes(mpMyId);
-      const title = youWon ? 'Victory!' : 'Defeat';
-      const reason = youWon ? 'You outlasted the opponent' : 'Your opponent lasted longer';
-      triggerDeath(title, reason);
+      const title = youWon ? 'Victory!' : (winnerIds.length ? 'Defeat' : 'Match Over');
+      const reason = youWon
+        ? 'You outlasted your opponent'
+        : (winnerIds.length ? 'Your opponent lasted longer' : 'The match has ended');
+      triggerDeath(title, reason, result);
+    };
+
+    window.onMultiplayerDisconnect = () => {
+      if (!multiplayerRunning) return;
+      multiplayerRunning = false;
+      multiplayerMode = false;
+      gameRunning = false;
+      mpMatchId = null;
+      mpMyId = null;
+      mpPlayers = {};
+      mpObstacles = [];
+      mpPredatorAlert = '';
+      document.getElementById('multiplayer-screen')?.classList.remove('hidden');
+      document.getElementById('start-screen')?.classList.remove('hidden');
+      document.getElementById('gameover-screen')?.classList.add('hidden');
+      alert('Multiplayer connection lost. Returning to the main menu.');
     };
 
     window.onMultiplayerPredatorIncoming = (data) => {
@@ -175,6 +197,7 @@ new p5(function(p) {
       w: Math.round(44 * sc), h: Math.round(22 * sc),
       frame: 0, frameTimer: 0,
       burrowCooldown: 0, burstCooldown: 0,
+      jumpCooldown: 0, jumpTimer: 0,
       inBurrow: false, burrowTimer: 0,
       shieldHits:  powerup === 'scalemail' ? 1 : 0,
       shieldFlash: 0
@@ -196,33 +219,84 @@ new p5(function(p) {
 
   function drawMultiplayerPlayers() {
     if (!mpPlayers) return;
-    const ids = Object.keys(mpPlayers);
-    for (const id of ids) {
+    // Local player is already fully rendered (with skin/hat) by drawLizard(),
+    // so only draw opponents here to avoid a duplicate "ghost" of yourself.
+    const ids = Object.keys(mpPlayers).filter(id => id !== mpMyId).sort();
+    const localX = Math.round(100 * scaleX);
+
+    ids.forEach((id, idx) => {
       const pl = mpPlayers[id];
-      if (!pl) continue;
-      const lane = Math.max(0, Math.min(LANE_COUNT - 1, pl.lane || 1));
-      // Apply server-reported jump/burrow offsets for remote players
+      if (!pl) return;
+      const lane = Math.max(0, Math.min(LANE_COUNT - 1, pl.lane ?? 1));
       const baseY = laneY(lane);
       const jumpTimer = pl.jumpTimer || 0;
       const jumpOffset = jumpTimer > 0 ? -Math.sin((jumpTimer / 20) * Math.PI) * 18 * sc : 0;
       const y = baseY + jumpOffset;
-      const x = Math.round(100 * scaleX);
+
+      // Stagger opponents' x position so two players sharing a lane don't
+      // fully overlap and become indistinguishable.
+      const step = Math.round(55 * scaleX);
+      const side = idx % 2 === 0 ? 1 : -1;
+      const rank = Math.ceil((idx + 1) / 2);
+      const x = localX + side * step * rank;
+
+      const alive = pl.alive !== false;
+      const alpha = alive ? 220 : 90;
+
       p.push();
       p.translate(x, y);
-      p.fill(id === mpMyId ? 90 : 160, id === mpMyId ? 220 : 140, id === mpMyId ? 100 : 80, 220);
       p.noStroke();
+      p.fill(alive ? 205 : 120, alive ? 90 : 90, alive ? 90 : 90, alpha);
       p.ellipse(0, 0, 40 * sc, 20 * sc);
-      p.fill(255);
+      p.fill(255, alpha);
       p.textSize(Math.max(10, 12 * sc));
-      p.textAlign(p.LEFT, p.CENTER);
-      p.text(id === mpMyId ? 'You' : 'Enemy', 24 * sc, 0);
+      p.textAlign(p.CENTER, p.CENTER);
+      const display = pl.username || 'Opponent';
+      p.text(alive ? display : display + ' 💀', 0, -16 * sc);
       p.pop();
-    }
+    });
+
     if (mpPredatorAlert) {
       p.fill(235, 80, 80, 230);
       p.textSize(Math.max(14, 16 * sc));
       p.textAlign(p.CENTER);
       p.text(mpPredatorAlert, W / 2, 30 * scaleY);
+    }
+  }
+
+  function drawMultiplayerObstacles() {
+    if (!mpObstacles || !mpObstacles.length) return;
+    const localX = Math.round(100 * scaleX);
+    const s = sc;
+
+    for (const o of mpObstacles) {
+      const lane = Math.max(0, Math.min(LANE_COUNT - 1, o.lane ?? 0));
+      const progress = Math.max(0, Math.min(1, o.progress ?? 0));
+      const cy = laneY(lane) + Math.round(11 * sc); // vertical center of lane sprite
+      const cx = p.lerp(W + 30 * scaleX, localX, progress);
+      const bob = Math.sin(p.frameCount * 0.12) * 1.5 * s;
+
+      p.noStroke();
+      if (o.type === 'rat') {
+        p.fill(125,105,85); p.ellipse(cx, cy+bob, 28*s, 15*s);
+        p.fill(110,90,70);  p.ellipse(cx+14*s, cy-2*s+bob, 14*s, 12*s);
+        p.fill(155,95,95);  p.ellipse(cx+18*s, cy-9*s+bob, 6*s, 8*s);
+        p.fill(255,120,100,200); p.textSize(Math.max(8,8*s)); p.textAlign(p.CENTER);
+        p.text('RAT', cx, cy - 18*s + bob);
+      } else if (o.type === 'stoat') {
+        p.fill(195,170,125); p.ellipse(cx,cy+bob,36*s,13*s);
+        p.ellipse(cx+18*s,cy-2*s+bob,12*s,11*s);
+        p.fill(75,38,18); p.ellipse(cx+22*s,cy-5*s+bob,5*s,7*s);
+        p.fill(255,160,80,200); p.textSize(Math.max(8,8*s)); p.textAlign(p.CENTER);
+        p.text('STOAT', cx, cy - 18*s + bob);
+      } else {
+        p.fill(180,165,145); p.ellipse(cx,cy+bob,32*s,16*s);
+        p.ellipse(cx+16*s,cy-2*s+bob,18*s,14*s);
+        p.fill(160,145,125);
+        p.triangle(cx+12*s,cy-9*s+bob, cx+15*s,cy-18*s+bob, cx+19*s,cy-9*s+bob);
+        p.fill(255,220,220,200); p.textSize(Math.max(8,8*s)); p.textAlign(p.CENTER);
+        p.text('CAT', cx, cy - 18*s + bob);
+      }
     }
   }
 
@@ -252,8 +326,8 @@ new p5(function(p) {
       // Client still runs update/render for visuals, but do not apply client-side death.
       update();
       render();
+      drawMultiplayerObstacles();
       drawMultiplayerPlayers();
-      drawHUD();
       return;
     }
 
@@ -316,6 +390,7 @@ new p5(function(p) {
     }
 
     // Local single-player jump handling
+    if (tuatara.jumpCooldown > 0) tuatara.jumpCooldown--;
     if (keys['j'] && tuatara.jumpCooldown === 0 && !tuatara.inBurrow) {
       tuatara.jumpTimer = 20; // frames
       tuatara.jumpCooldown = 60;
@@ -338,8 +413,8 @@ new p5(function(p) {
       if (!lastZ || lastZ.x + lastZ.w < W + 80) spawnZone(W + 60);
 
       const obsOnScreen = obstacles.filter(o => o.x > W - 20).length;
-      const spawnChance = p.map(framesSurvived, 120, 4000, 0.005, 0.022);
-      if (obsOnScreen === 0 && framesSurvived > 120 && p.random() < spawnChance) {
+      const spawnChance = p.map(framesSurvived, 120, 4000, 0.008, 0.03);
+      if (obsOnScreen < 2 && framesSurvived > 120 && p.random() < spawnChance) {
         spawnObstacle();
       }
     }
@@ -428,8 +503,9 @@ new p5(function(p) {
 
   function spawnObstacle() {
     const lane  = Math.floor(p.random(0, LANE_COUNT));
-    const types = ['rat','stoat','cat'];
-    const type  = framesSurvived > 1800 ? p.random(types) : p.random(['rat','stoat']);
+    const type  = framesSurvived > 1800
+      ? p.random(['rat','rat','rat','rat','stoat','cat'])
+      : p.random(['rat','rat','rat','rat','stoat']);
     const ow    = Math.round(36 * sc);
     obstacles.push({
       type, x: W + 20, w: ow,
@@ -753,10 +829,40 @@ new p5(function(p) {
     else if (temp <= TEMP_MIN) triggerDeath('Too Cold!', 'Your body temperature crashed');
   }
 
-  async function triggerDeath(title, reason) {
-    console.log('[GAME] triggerDeath', { title, reason, score, earnedThisRun });
+  async function triggerDeath(title, reason, mpResult = null) {
+    console.log('[GAME] triggerDeath', { title, reason, score, earnedThisRun, multiplayerMode });
     gameRunning = false;
 
+    // ── Multiplayer: server is authoritative. Stats/leaderboard were already
+    // recorded server-side (stats.js). Never touch single-player scales or
+    // submit a client-computed score to the single-player leaderboard here —
+    // doing so would both pollute that leaderboard and let a client fake
+    // currency by just sitting in a multiplayer match.
+    if (multiplayerMode && mpResult) {
+      const me = (mpResult.players || []).find(p => p.id === mpMyId);
+      const opponent = (mpResult.players || []).find(p => p.id !== mpMyId);
+
+      document.getElementById('go-title').textContent  = title;
+      document.getElementById('go-reason').textContent = reason;
+      document.getElementById('go-score').textContent  = (me ? Math.floor(me.score || 0) : score) + 'm';
+      document.getElementById('go-earned').textContent = `${(me?.kills) || 0} kills`;
+      document.getElementById('go-best').textContent   = opponent
+        ? `${opponent.username || 'Opponent'}: ${Math.floor(opponent.score || 0)}m`
+        : '—';
+      document.getElementById('go-icon').textContent   = title.includes('Victory') ? '🏆' : '💀';
+
+      document.getElementById('go-lb-msg').classList.add('hidden');
+      gameoverScreen.classList.remove('hidden');
+
+      document.getElementById('go-store-btn').onclick = () => {
+        window._storeFromGameover = true;
+        openStore();
+      };
+      return;
+    }
+
+    // ── Single-player: client-computed score is fine here since there's
+    // nothing else to game and the server isn't involved.
     window.LR.scales += earnedThisRun;
     if (score > window.LR.best) window.LR.best = score;
     saveData();
@@ -773,10 +879,13 @@ new p5(function(p) {
 
     const lbMsg = document.getElementById('go-lb-msg');
     lbMsg.classList.add('hidden');
-    if (window.currentUser && score > 0) {
+    if (window.fbSubmitScore && score > 0) {
       try {
-        const prevBest = window.currentUser.bestScore || 0;
-        await window.fbSubmitScore(score);
+        const prevBest = window.currentUser?.bestScore || 0;
+        const result = await window.fbSubmitScore(score);
+        if (result?.newBest !== undefined && window.currentUser) {
+          window.currentUser.bestScore = result.newBest;
+        }
         if (score > prevBest) {
           lbMsg.textContent = '🏆 New leaderboard best saved!';
           lbMsg.classList.remove('hidden');
@@ -800,13 +909,22 @@ new p5(function(p) {
     const k = p.keyCode;
     console.log('[GAME] keyPressed', { key: p.key, keyCode: k });
     if (multiplayerRunning && window.multiplayer?.socket) {
-      if (k === 38) window.multiplayer.socket.emit('input', { type: 'lane', lane: Math.max(0, (mpPlayers[mpMyId]?.lane || 1) - 1) });
-      if (k === 40) window.multiplayer.socket.emit('input', { type: 'lane', lane: Math.min(LANE_COUNT - 1, (mpPlayers[mpMyId]?.lane || 1) + 1) });
-      if (k === 39) window.multiplayer.socket.emit('input', { type: 'burst' });
-      if (k === 32) window.multiplayer.socket.emit('input', { type: 'burrow' });
-      if (k === 65) window.multiplayer.socket.emit('input', { type: 'attack' });
-      if (k === 70) window.multiplayer.socket.emit('input', { type: 'flick_predator' });
-      if (k === 74) window.multiplayer.socket.emit('input', { type: 'jump' });
+      const currentLane = (mpMyId && mpPlayers[mpMyId] && Number.isInteger(mpPlayers[mpMyId].lane)) ? mpPlayers[mpMyId].lane : (tuatara?.lane ?? 1);
+      if (k === 38) {
+        const payload = { type: 'lane', lane: Math.max(0, currentLane - 1) };
+        console.log('[GAME] emit input', payload);
+        window.multiplayer.socket.emit('input', payload);
+      }
+      if (k === 40) {
+        const payload = { type: 'lane', lane: Math.min(LANE_COUNT - 1, currentLane + 1) };
+        console.log('[GAME] emit input', payload);
+        window.multiplayer.socket.emit('input', payload);
+      }
+      if (k === 39) { const payload = { type: 'burst' }; console.log('[GAME] emit input', payload); window.multiplayer.socket.emit('input', payload); }
+      if (k === 32) { const payload = { type: 'burrow' }; console.log('[GAME] emit input', payload); window.multiplayer.socket.emit('input', payload); }
+      if (k === 65) { const payload = { type: 'attack' }; console.log('[GAME] emit input', payload); window.multiplayer.socket.emit('input', payload); }
+      if (k === 70) { const payload = { type: 'flick_predator' }; console.log('[GAME] emit input', payload); window.multiplayer.socket.emit('input', payload); }
+      if (k === 74) { const payload = { type: 'jump' }; console.log('[GAME] emit input', payload); window.multiplayer.socket.emit('input', payload); }
       if ([32,38,40,39,65,70,74].includes(k)) return false;
       return;
     }

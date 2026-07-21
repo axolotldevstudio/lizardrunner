@@ -3,7 +3,8 @@ const mpConnectBtn = document.getElementById('mp-connect-btn');
 const mpFindBtn = document.getElementById('mp-find-btn');
 const mpCancelBtn = document.getElementById('mp-cancel-btn');
 const mpBackBtn = document.getElementById('mp-back-btn');
-const mpServerInput = document.getElementById('mp-server');
+const mpRegionContainer = document.getElementById('mp-regions');
+const mpServerInput = document.getElementById('mp-server'); // fallback hidden input
 const mpLogList = document.getElementById('mp-log-list');
 
 let socket = null;
@@ -11,10 +12,35 @@ let connected = false;
 let matchId = null;
 let waiting = false;
 
-// Initialize server input with configured URL
-if (mpServerInput && typeof CONFIG !== 'undefined') {
-  mpServerInput.value = CONFIG.BACKEND_URL;
-  mpServerInput.placeholder = CONFIG.BACKEND_URL;
+// Initialize server input and region buttons with configured URLs
+if (typeof CONFIG !== 'undefined') {
+  const defaultUrl = CONFIG.BACKEND_URL;
+  if (mpServerInput) {
+    mpServerInput.value = defaultUrl;
+    mpServerInput.placeholder = defaultUrl;
+  }
+  if (mpRegionContainer && CONFIG.BACKEND_REGIONS) {
+    const buttons = mpRegionContainer.querySelectorAll('.mp-region');
+    buttons.forEach(btn => {
+      const region = btn.dataset.region;
+      const url = CONFIG.BACKEND_REGIONS[region] || defaultUrl;
+      btn.dataset.url = url;
+      btn.addEventListener('click', () => {
+        buttons.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        if (mpServerInput) mpServerInput.value = url;
+      });
+      if (region === 'us') btn.classList.add('active');
+    });
+    const active = mpRegionContainer.querySelector('.mp-region.active');
+    if (active && mpServerInput) mpServerInput.value = active.dataset.url;
+  }
+}
+
+function getSelectedServerUrl() {
+  const activeBtn = document.querySelector('#mp-regions .mp-region.active');
+  if (activeBtn && activeBtn.dataset.url) return activeBtn.dataset.url;
+  return mpServerInput?.value.trim() || (CONFIG?.BACKEND_URL || '');
 }
 
 function logMultiplayer(message) {
@@ -48,12 +74,12 @@ async function connectMultiplayer() {
     setStatus('Multiplayer disabled', 'error');
     return;
   }
-  let serverUrl = mpServerInput.value.trim();
+  let serverUrl = getSelectedServerUrl();
   
-  // Use config URL if no server URL is manually entered
+  // Use config URL if no server URL resolved
   if (!serverUrl && typeof CONFIG !== 'undefined') {
     serverUrl = CONFIG.BACKEND_URL;
-    mpServerInput.value = serverUrl;
+    if (mpServerInput) mpServerInput.value = serverUrl;
   }
   
   if (!serverUrl) {
@@ -122,6 +148,9 @@ async function connectMultiplayer() {
     matchId = null;
     if (window.multiplayer) {
       window.multiplayer.socket = null;
+    }
+    if (window.onMultiplayerDisconnect) {
+      window.onMultiplayerDisconnect();
     }
     resetMultiplayerUi();
     logMultiplayer('Disconnected from server');
