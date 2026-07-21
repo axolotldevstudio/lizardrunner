@@ -101,8 +101,9 @@ describe('multiplayer integration', () => {
   });
 
   test('match starts when minimum players ready', async () => {
+    const { MAX_PLAYERS_PER_MATCH } = require('../constants');
     const players = [];
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < MAX_PLAYERS_PER_MATCH; i++) {
       const { client, payload } = await connectClient(port, `uid-match-${i}`);
       players.push({ client, payload });
     }

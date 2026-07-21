@@ -39,29 +39,32 @@ class Lobby {
   }
 
   evaluateStart() {
-    // Start immediately once we have the configured max players
+    // If we have the maximum allowed players, start countdown immediately
     if (this.players.length >= MAX_LOBBY_PLAYERS) {
-      return this.startImmediately();
+      return this.startCountdown();
     }
 
-    // By default start immediately when reaching minimum players, but defer to next tick
-    // to avoid race conditions with socket join/state propagation.
+    // When reaching the minimum players required, start a short countdown (3s)
+    // to give clients time to receive the lobby update and prepare.
     if (this.players.length >= MIN_PLAYERS_TO_START) {
-      console.log(`[LOBBY] reached MIN_PLAYERS_TO_START (${MIN_PLAYERS_TO_START}) - scheduling immediate start for lobby ${this.id}`);
-      return setImmediate(() => this.startImmediately());
+      console.log(`[LOBBY] reached MIN_PLAYERS_TO_START (${MIN_PLAYERS_TO_START}) - starting short countdown for lobby ${this.id}`);
+      return this.startCountdown();
     }
   }
 
   startCountdown() {
     if (this.countdownTimer) return;
     this.status = 'starting';
+    // Use a short 3 second countdown for quick matches
+    const countdownMs = 3000;
+    this.countdown = countdownMs;
     this.countdownStart = Date.now();
     this.broadcastUpdate();
-    console.log(`[LOBBY] countdown started for lobby ${this.id}: ${this.countdown}ms`);
+    console.log(`[LOBBY] short countdown (${countdownMs}ms) started for lobby ${this.id}`);
     this.countdownTimer = setTimeout(() => {
       console.log(`[LOBBY] countdown expired for lobby ${this.id}, starting match`);
       this.startMatch();
-    }, this.countdown);
+    }, countdownMs);
   }
 
   cancelCountdown() {

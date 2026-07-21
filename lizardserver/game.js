@@ -10,7 +10,11 @@ const {
   TEMP_START,
   MATCH_MAX_DURATION_MS,
   ATTACK_RANGE,
-  MAX_ATTACK_COOLDOWN
+  MAX_ATTACK_COOLDOWN,
+  OBSTACLE_TRAVEL_TICKS,
+  OBSTACLE_WARMUP_TICKS,
+  OBSTACLE_MAX_CONCURRENT,
+  OBSTACLE_CAT_UNLOCK_TICKS
 } = require('./constants');
 
 function clamp(value, min, max) {
@@ -30,6 +34,14 @@ class Match {
     this.broadcastFrequency = Math.max(1, Math.round(100 / TICK_MS));
     this.mapSeed = Math.floor(Math.random() * 1e9);
     this.onFinished = onFinished;
+
+    // ── Environment hazards (server-authoritative "rats/stoats/cats") ──
+    // Obstacles are modeled in time, not pixels: each has a spawn tick and
+    // a fixed travel duration. Progress (0..1) is computed on demand so
+    // clients of any resolution can render it consistently.
+    this.obstacles = [];
+    this.nextObstacleId = 1;
+
     this.players.forEach((player) => {
       player.match = this;
       player.resetForMatch();
@@ -67,19 +79,32 @@ class Match {
     this.io.to(this.id).emit(event, payload);
   }
 
+  getPublicObstacles() {
+    return this.obstacles.map((o) => ({
+      id: o.id,
+      type: o.type,
+      lane: o.lane,
+      progress: Math.min(1, (this.frame - o.spawnTick) / OBSTACLE_TRAVEL_TICKS)
+    }));
+  }
+
   sendStateToPlayer(player) {
     player.socket?.emit('state', {
       frame: this.frame,
       players: this.players.reduce((acc, p) => {
         acc[p.id] = p.getPublicState();
         return acc;
-      }, {})
+      }, {}),
+      obstacles: this.getPublicObstacles()
     });
   }
 
   handleInput(firebaseUid, input) {
     const player = this.players.find((p) => p.firebaseUid === firebaseUid || p.id === firebaseUid);
     if (!player || player.state !== 'alive') return;
+    // Log incoming input for debugging
+    // Keep logs minimal in production; verbose useful while diagnosing controls
+    console.log(`[MATCH:${this.id}] handleInput from ${player.id}:`, input);
     const action = player.applyInput(input);
     if (action === 'attack') {
       this.applyAttack(player);
@@ -119,6 +144,64 @@ class Match {
     });
   }
 
+  // ── Environment hazards ─────────────────────────────────────────────
+  maybeSpawnObstacle() {
+    if (this.frame < OBSTACLE_WARMUP_TICKS) return;
+    if (this.obstacles.length >= OBSTACLE_MAX_CONCURRENT) return;
+
+    // Spawn probability ramps up the longer the match runs, mirroring the
+    // single-player difficulty curve (mapped from framesSurvived there).
+    const rampTicks = 4000; // matches single-player's ramp window in frames
+    const t = clamp((this.frame - OBSTACLE_WARMUP_TICKS) / rampTicks, 0, 1);
+    const spawnChance = 0.015 + t * 0.03; // ~0.015 -> 0.045 per tick
+
+    if (Math.random() >= spawnChance) return;
+
+    const lane = Math.floor(Math.random() * LANE_COUNT);
+    // Don't stack two obstacles in the same lane back-to-back
+    const laneOccupied = this.obstacles.some((o) => o.lane === lane && o.progress < 0.6);
+    if (laneOccupied) return;
+
+    const types = this.frame > OBSTACLE_CAT_UNLOCK_TICKS ? ['rat', 'rat', 'rat', 'rat', 'stoat', 'cat'] : ['rat', 'rat', 'rat', 'rat', 'stoat'];
+    const type = types[Math.floor(Math.random() * types.length)];
+
+    this.obstacles.push({
+      id: this.nextObstacleId++,
+      type,
+      lane,
+      spawnTick: this.frame
+    });
+  }
+
+  updateObstacles() {
+    const remaining = [];
+    for (const o of this.obstacles) {
+      const progress = (this.frame - o.spawnTick) / OBSTACLE_TRAVEL_TICKS;
+      if (progress < 1) {
+        remaining.push(o);
+        continue;
+      }
+      // Obstacle has arrived — resolve collision against every alive player
+      // currently in its lane (server-authoritative, matches PvP attack rules).
+      this.players.forEach((player) => {
+        if (!player.alive || player.state !== 'alive') return;
+        if (player.lane !== o.lane) return;
+        if (player.inBurrow) return; // burrowing dodges ground hazards
+
+        if (player.shieldHits > 0) {
+          player.shieldHits -= 1;
+        } else {
+          player.alive = false;
+          player.state = 'dead';
+          const labels = { rat: 'A rat', stoat: 'A stoat', cat: 'A cat' };
+          player.deathReason = `${labels[o.type] || 'Something'} got you`;
+        }
+      });
+      // obstacle is consumed once it arrives, whether it hit someone or not
+    }
+    this.obstacles = remaining;
+  }
+
   tick() {
     this.frame += 1;
     const alivePlayers = this.players.filter((player) => player.alive);
@@ -131,6 +214,8 @@ class Match {
       player.tick();
     });
 
+    this.maybeSpawnObstacle();
+    this.updateObstacles();
     this.resolveAttacks();
     this.resolvePredators();
     this.updateScores();
@@ -172,7 +257,8 @@ class Match {
       players: this.players.reduce((acc, player) => {
         acc[player.id] = player.getPublicState();
         return acc;
-      }, {})
+      }, {}),
+      obstacles: this.getPublicObstacles()
     };
     this.broadcast('state', state);
   }

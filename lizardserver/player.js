@@ -18,11 +18,12 @@ function clamp(value, min, max) {
 }
 
 class Player {
-  constructor(firebaseUid, socket) {
+  constructor(firebaseUid, socket, displayName = null) {
     this.firebaseUid = firebaseUid || null;
     this.socket = socket;
     this.socketId = socket?.id || null;
     this.id = firebaseUid ? firebaseUid : `guest_${socket?.id || Math.random().toString(36).slice(2, 8)}`;
+    this.displayName = displayName || null;
     this.resetForMatch();
     this.disconnectTimer = null;
     this.lastSeen = Date.now();
@@ -68,6 +69,11 @@ class Player {
     this.deathReason = null;
     this.predatorQueue = [];
     this.replay = [];
+    // NOTE: powerups (e.g. the "scalemail" shield) live in Firebase user data
+    // client-side but are not yet wired up server-side, so this always
+    // starts at 0. Obstacle/attack collisions will treat any player without
+    // a shield as a normal instant-kill hit.
+    this.shieldHits = this.shieldHits || 0;
   }
 
   getPublicState() {
@@ -82,7 +88,8 @@ class Player {
       inBurrow: this.inBurrow,
       jumpTimer: this.jumpTimer || 0,
       shieldHits: this.shieldHits || 0,
-      kills: this.kills || 0
+      kills: this.kills || 0,
+      username: this.displayName || `Player_${String(this.id).slice(0,6)}`
     };
   }
 

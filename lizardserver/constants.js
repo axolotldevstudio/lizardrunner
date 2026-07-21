@@ -1,7 +1,8 @@
 const TICK_MS = Number(process.env.SERVER_TICK_MS) || 50; // 20 ticks per second
-const MAX_PLAYERS_PER_MATCH = Number(process.env.MAX_PLAYERS_PER_MATCH) || 10;
+// Default to 2 players per match (make PvP quick to test locally)
+const MAX_PLAYERS_PER_MATCH = Number(process.env.MAX_PLAYERS_PER_MATCH) || 2;
 const MAX_LOBBY_PLAYERS = MAX_PLAYERS_PER_MATCH;
-// Require exactly 10 players per match by default (can be overridden via env)
+// Minimum players required to start a match (default 2)
 const MIN_PLAYERS_TO_START = Number(process.env.MIN_PLAYERS_TO_START) || 2;
 // Default lobby countdown (ms) when minimum players reached — set to 30s
 const MATCHMAKING_TIMEOUT_MS = Number(process.env.MATCHMAKING_TIMEOUT_MS) || 30000;
@@ -24,6 +25,14 @@ const MAX_INPUTS_PER_SECOND = 45;
 const ATTACK_RANGE = 1;
 const JUMP_HEIGHT = 18;
 const MAX_PREDATOR_DELAY = 24; // ticks
+
+// ── Environment hazards (rats/stoats/cats) ──────────────────────────
+// Obstacles are modeled in ticks, not pixels, so they render consistently
+// across clients regardless of screen size.
+const OBSTACLE_TRAVEL_TICKS = Number(process.env.OBSTACLE_TRAVEL_TICKS) || 60; // ~3s at 20 ticks/sec
+const OBSTACLE_WARMUP_TICKS = Number(process.env.OBSTACLE_WARMUP_TICKS) || 60; // grace period at match start
+const OBSTACLE_MAX_CONCURRENT = Number(process.env.OBSTACLE_MAX_CONCURRENT) || 3;
+const OBSTACLE_CAT_UNLOCK_TICKS = Number(process.env.OBSTACLE_CAT_UNLOCK_TICKS) || 1800; // ~90s before cats appear
 
 module.exports = {
   TICK_MS,
@@ -49,5 +58,9 @@ module.exports = {
   MAX_INPUTS_PER_SECOND,
   ATTACK_RANGE,
   JUMP_HEIGHT,
-  MAX_PREDATOR_DELAY
+  MAX_PREDATOR_DELAY,
+  OBSTACLE_TRAVEL_TICKS,
+  OBSTACLE_WARMUP_TICKS,
+  OBSTACLE_MAX_CONCURRENT,
+  OBSTACLE_CAT_UNLOCK_TICKS
 };

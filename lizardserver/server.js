@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const { initFirebase, getAdmin, isFirebaseReady } = require('./firebase');
+const { initFirebase, getAdmin, getRtdb, isFirebaseReady } = require('./firebase');
 const Player = require('./player');
 const Match = require('./game');
 const Matchmaking = require('./matchmaking');
@@ -106,11 +106,35 @@ function createServerInstance(port = process.env.PORT || 3001) {
       firebaseUid = socket.id;
     }
 
+    // Resolve a display name for the player (RTDB username -> Firebase displayName -> fallback 'Player')
+    let displayName = null;
+    try {
+      const rtdb = getRtdb();
+      if (rtdb) {
+        const snap = await rtdb.ref(`users/${firebaseUid}/username`).once('value');
+        displayName = snap.val() || null;
+      }
+    } catch (err) {
+      console.warn('Failed to fetch username from RTDB:', err && err.message ? err.message : String(err));
+    }
+
+    if (!displayName && adminClient && adminClient.auth) {
+      try {
+        const userRecord = await adminClient.auth().getUser(firebaseUid);
+        displayName = userRecord.displayName || null;
+      } catch (err) {
+        // ignore
+      }
+    }
+
+    if (!displayName) displayName = 'Player';
+
     let player = playersByFirebaseUid.get(firebaseUid);
     if (!player) {
-      player = new Player(firebaseUid, socket);
+      player = new Player(firebaseUid, socket, displayName);
       playersByFirebaseUid.set(firebaseUid, player);
     } else {
+      player.displayName = displayName || player.displayName || 'Player';
       player.attachSocket(socket);
     }
 
@@ -130,7 +154,7 @@ function createServerInstance(port = process.env.PORT || 3001) {
       players: lobby?.players.map((p) => ({ id: p.id })) || [],
       count: lobby?.players.length || 0,
       maxPlayers: MAX_LOBBY_PLAYERS,
-      countdownMs: lobby?.countdownStart ? Math.max(0, LOBBY_COUNTDOWN_MS - (Date.now() - lobby.countdownStart)) : 0
+      countdownMs: lobby?.countdownStart ? Math.max(0, (lobby.countdown || LOBBY_COUNTDOWN_MS) - (Date.now() - lobby.countdownStart)) : 0
     };
   }
 
@@ -169,7 +193,7 @@ function createServerInstance(port = process.env.PORT || 3001) {
     const player = await getPlayer(socket);
     console.log('connected:', player.id, 'firebaseUid=', player.firebaseUid, 'socketId=', player.socketId);
 
-    socket.emit('connected', { playerId: player.id, firebaseUid: player.firebaseUid, socketId: player.socketId });
+    socket.emit('connected', { playerId: player.id, firebaseUid: player.firebaseUid, socketId: player.socketId, username: player.displayName });
     socket.emit('lobby_update', getLobbyPayload(player));
 
     socket.on('find_match', () => {
@@ -192,6 +216,7 @@ function createServerInstance(port = process.env.PORT || 3001) {
       // Prevent malformed input types
       if (typeof payload.type !== 'string') return;
       player.updateLastSeen();
+      console.log(`[INPUT] from ${player.id} (${player.firebaseUid}) payload=`, payload);
       if (player.match) {
         player.match.handleInput(player.firebaseUid, payload);
       }
