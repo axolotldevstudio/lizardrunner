@@ -12,7 +12,7 @@ const os = require('os');
 function createServerInstance(port = process.env.PORT || 3001) {
   const app = express();
   const httpServer = http.createServer(app);
-  const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000,http://127.0.0.1:3000').split(',').map(origin => origin.trim()).filter(Boolean);
+  const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'lizardrunnerdev.pages.dev,http://127.0.0.1:3000').split(',').map(origin => origin.trim()).filter(Boolean);
   const isAllowedOrigin = (origin) => {
     if (!origin) {
       return true;
