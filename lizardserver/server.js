@@ -285,7 +285,7 @@ return {
     httpServer.listen(port, () => resolve(httpServer.address().port));
   })
 };
-}
+
 
 module.exports = createServerInstance;
 
