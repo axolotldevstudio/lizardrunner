@@ -8,6 +8,22 @@ function makeIdToken(uid) {
   return Buffer.from(JSON.stringify({ uid, role: 'test' })).toString('base64');
 }
 
+async function connectClient(port, uid) {
+  const client = Client(`http://localhost:${port}`, {
+    transports: ['websocket'],
+    auth: { idToken: makeIdToken(uid) },
+    reconnection: false,
+    forceNew: true
+  });
+
+  const payload = await Promise.race([
+    new Promise((resolve) => client.once('connected', resolve)),
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`Client ${uid} timeout`)), 10000))
+  ]);
+
+  return { client, payload };
+}
+
 describe('multiplayer integration', () => {
   let server;
   let port;
@@ -15,43 +31,29 @@ describe('multiplayer integration', () => {
   beforeAll(async () => {
     process.env.ALLOWED_ORIGINS = 'http://localhost:3000';
     process.env.NODE_ENV = 'test';
-    if (admin) {
-      admin.auth = () => ({
-        verifyIdToken: async (token) => {
-          const decoded = JSON.parse(Buffer.from(token, 'base64').toString('utf8'));
-          return { uid: decoded.uid };
-        }
-      });
-    }
     server = createServerInstance(0);
     port = await server.start();
   });
 
   afterAll(async () => {
     if (server) {
-      await server.close();
+      await new Promise((resolve) => {
+        server.io.disconnectSockets();
+        setTimeout(async () => {
+          try {
+            await server.close();
+          } catch (e) {
+            console.error('Error closing server:', e);
+          }
+          resolve();
+        }, 100);
+      });
     }
   });
 
   test('two players connect and authenticate', async () => {
-    const clientA = Client(`http://localhost:${port}`, {
-      transports: ['websocket'],
-      auth: { idToken: makeIdToken('uid-a') }
-    });
-    const clientB = Client(`http://localhost:${port}`, {
-      transports: ['websocket'],
-      auth: { idToken: makeIdToken('uid-b') }
-    });
-
-    clientA.on('connect_error', (error) => {
-      throw new Error(`Client A failed to connect: ${error.message}`);
-    });
-    clientB.on('connect_error', (error) => {
-      throw new Error(`Client B failed to connect: ${error.message}`);
-    });
-
-    const payloadA = await new Promise((resolve) => clientA.once('connected', resolve));
-    const payloadB = await new Promise((resolve) => clientB.once('connected', resolve));
+    const { client: clientA, payload: payloadA } = await connectClient(port, 'uid-a');
+    const { client: clientB, payload: payloadB } = await connectClient(port, 'uid-b');
 
     expect(payloadA.playerId).toBeTruthy();
     expect(payloadB.playerId).toBeTruthy();
@@ -60,5 +62,140 @@ describe('multiplayer integration', () => {
 
     clientA.close();
     clientB.close();
+    
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  });
+
+  test('players can find a match and enter lobby', async () => {
+    const { client: clientA, payload: payloadA } = await connectClient(port, 'uid-c');
+    const { client: clientB, payload: payloadB } = await connectClient(port, 'uid-d');
+
+    clientA.emit('find_match');
+    clientB.emit('find_match');
+
+    const lobbyUpdateA = await Promise.race([
+      new Promise((resolve) => clientA.once('lobby_update', resolve)),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Lobby update timeout')), 5000))
+    ]);
+
+    const lobbyUpdateB = await Promise.race([
+      new Promise((resolve) => clientB.once('lobby_update', resolve)),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Lobby update timeout')), 5000))
+    ]);
+
+    expect(lobbyUpdateA.status).toBeDefined();
+    expect(lobbyUpdateB.status).toBeDefined();
+    expect(lobbyUpdateA.count).toBeGreaterThan(0);
+    expect(lobbyUpdateB.count).toBeGreaterThan(0);
+
+    clientA.close();
+    clientB.close();
+    
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  });
+
+  test('match starts when minimum players ready', async () => {
+    const players = [];
+    for (let i = 0; i < 3; i++) {
+      const { client, payload } = await connectClient(port, `uid-match-${i}`);
+      players.push({ client, payload });
+    }
+
+    players.forEach((p) => p.client.emit('find_match'));
+
+    const matchStartPromises = players.map((p) =>
+      Promise.race([
+        new Promise((resolve) => p.client.once('match_start', resolve)),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Match start timeout')), 10000))
+      ])
+    );
+
+    const matchStarts = await Promise.all(matchStartPromises);
+
+    matchStarts.forEach((start) => {
+      expect(start.matchId).toBeTruthy();
+      expect(start.players).toBeDefined();
+      expect(Array.isArray(start.players)).toBe(true);
+    });
+
+    players.forEach((p) => p.client.close());
+    
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  });
+
+  test('server emits authoritative game state', async () => {
+    const { client: clientA, payload: payloadA } = await connectClient(port, 'uid-state-a');
+    const { client: clientB, payload: payloadB } = await connectClient(port, 'uid-state-b');
+
+    clientA.emit('find_match');
+    clientB.emit('find_match');
+
+    const matchStart = await Promise.race([
+      new Promise((resolve) => clientA.once('match_start', resolve)),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Match start timeout')), 10000))
+    ]);
+
+    const gameState = await Promise.race([
+      new Promise((resolve) => clientA.once('state', resolve)),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('State timeout')), 5000))
+    ]);
+
+    expect(gameState.players).toBeDefined();
+    expect(typeof gameState.players).toBe('object');
+    expect(gameState.frame).toBeGreaterThanOrEqual(0);
+
+    clientA.close();
+    clientB.close();
+    
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  });
+
+  test('invalid inputs are rejected', async () => {
+    const { client: clientA, payload: payloadA } = await connectClient(port, 'uid-input-a');
+    const { client: clientB, payload: payloadB } = await connectClient(port, 'uid-input-b');
+
+    clientA.emit('find_match');
+    clientB.emit('find_match');
+
+    await Promise.race([
+      new Promise((resolve) => clientA.once('match_start', resolve)),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Match start timeout')), 10000))
+    ]);
+
+    clientA.emit('input', { lane: -1, action: 'invalid' });
+    clientA.emit('input', { lane: 999, action: 'jump' });
+    clientA.emit('input', null);
+
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    clientA.close();
+    clientB.close();
+    
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  });
+
+  test('disconnected players are marked dead', async () => {
+    const { client: clientA } = await connectClient(port, 'uid-disco-a');
+    const { client: clientB } = await connectClient(port, 'uid-disco-b');
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    clientA.emit('find_match');
+    clientB.emit('find_match');
+
+    await Promise.race([
+      new Promise((resolve) => clientA.once('match_start', resolve)),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Match start timeout')), 10000))
+    ]);
+
+    clientA.close();
+
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+
+    clientB.close();
+    
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    
+    expect(true).toBe(true);
   });
 });

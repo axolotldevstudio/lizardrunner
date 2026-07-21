@@ -419,10 +419,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const fromGO = !document.getElementById('gameover-screen').classList.contains('hidden') ||
                    window._storeFromGameover;
     closeStore(window._storeFromGameover);
-    window._storeFromGameover = false;
+    window._storeFromGameover = false; 
   });
 
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => renderTab(btn.dataset.tab));
   });
-}); 
+});

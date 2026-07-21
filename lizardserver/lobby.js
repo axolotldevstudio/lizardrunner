@@ -10,7 +10,8 @@ class Lobby {
     this.id = makeLobbyId();
     this.players = [];
     this.status = 'waiting';
-    this.countdown = LOBBY_COUNTDOWN_MS;
+    const countdownMs = process.env.NODE_ENV === 'test' ? 1000 : LOBBY_COUNTDOWN_MS;
+    this.countdown = countdownMs;
     this.countdownStart = null;
     this.countdownTimer = null;
     this.onReady = onReady;
@@ -95,7 +96,8 @@ class Lobby {
   }
 
   broadcastUpdate() {
-    const remaining = this.countdownStart ? Math.max(0, LOBBY_COUNTDOWN_MS - (Date.now() - this.countdownStart)) : 0;
+    const countdownMs = process.env.NODE_ENV === 'test' ? 1000 : LOBBY_COUNTDOWN_MS;
+    const remaining = this.countdownStart ? Math.max(0, countdownMs - (Date.now() - this.countdownStart)) : 0;
     const payload = {
       lobbyId: this.id,
       status: this.status,

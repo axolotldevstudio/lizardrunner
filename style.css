@@ -726,6 +726,48 @@ button:active { transform: scale(0.96); }
 #leaderboard li:nth-child(2) .lb-name { color: var(--sand); }
 #leaderboard li:nth-child(3) .lb-name { color: #c4a96a; }
 
+/* leaderboard tabs */
+#leaderboard-tabs {
+  display: flex;
+  gap: 8px;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--rock-light);
+  background: var(--rock);
+}
+
+.lb-tab-btn {
+  padding: 8px 16px;
+  border: 1px solid var(--rock-light);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.lb-tab-btn:hover {
+  color: var(--sand);
+  border-color: var(--sand);
+}
+
+.lb-tab-btn.active {
+  background: var(--sand);
+  color: var(--rock);
+  border-color: var(--sand);
+}
+
+/* multiplayer-specific stats */
+#leaderboard .lb-mp .lb-stat {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--gold);
+  flex-shrink: 0;
+  min-width: 35px;
+  text-align: right;
+}
+
 /* backdrop dim when leaderboard is open */
 #leaderboard-backdrop {
   position: absolute;

@@ -11,6 +11,12 @@ let connected = false;
 let matchId = null;
 let waiting = false;
 
+// Initialize server input with configured URL
+if (mpServerInput && typeof CONFIG !== 'undefined') {
+  mpServerInput.value = CONFIG.BACKEND_URL;
+  mpServerInput.placeholder = CONFIG.BACKEND_URL;
+}
+
 function logMultiplayer(message) {
   const item = document.createElement('div');
   item.textContent = message;
@@ -30,9 +36,16 @@ function resetMultiplayerUi() {
 }
 
 async function connectMultiplayer() {
-  const serverUrl = mpServerInput.value.trim();
+  let serverUrl = mpServerInput.value.trim();
+  
+  // Use config URL if no server URL is manually entered
+  if (!serverUrl && typeof CONFIG !== 'undefined') {
+    serverUrl = CONFIG.BACKEND_URL;
+    mpServerInput.value = serverUrl;
+  }
+  
   if (!serverUrl) {
-    setStatus('Enter a server URL first', 'error');
+    setStatus('No server URL configured', 'error');
     return;
   }
 
@@ -41,7 +54,7 @@ async function connectMultiplayer() {
     socket = null;
   }
 
-  setStatus('Connecting...');
+  setStatus('Connecting to ' + serverUrl + '...');
   const authPayload = {};
   if (window.fbGetIdToken) {
     const idToken = await window.fbGetIdToken();
@@ -49,7 +62,11 @@ async function connectMultiplayer() {
   }
   socket = io(serverUrl, {
     transports: ['websocket'],
-    auth: authPayload
+    auth: authPayload,
+    reconnection: true,
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 5000,
+    reconnectionAttempts: 5
   });
 
   socket.on('connect', () => {

@@ -1,4 +1,5 @@
 const Player = require('./player');
+const { submitMatchResults } = require('./stats');
 const {
   TICK_MS,
   LANE_COUNT,
@@ -184,6 +185,12 @@ class Match {
       winnerIds,
       players: this.players.map((player) => player.getPublicState())
     });
+    
+    // Submit results to Firebase (server-authoritative)
+    submitMatchResults(this.id, this.players, winnerIds).catch(err => {
+      console.error('[GAME] Failed to submit match results:', err);
+    });
+
     this.players.forEach((player) => {
       player.match = null;
       player.socket?.leave(this.id);

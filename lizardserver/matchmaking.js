@@ -10,7 +10,7 @@ class Matchmaking {
   }
 
   getOpenLobby() {
-    if (!this.activeLobby || this.activeLobby.status !== 'waiting') {
+    if (!this.activeLobby || this.activeLobby.status === 'started') {
       this.activeLobby = new Lobby(this.io, (lobby, players) => {
         this.lobbies.delete(lobby.id);
         if (this.activeLobby === lobby) {

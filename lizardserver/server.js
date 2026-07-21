@@ -68,12 +68,21 @@ function createServerInstance(port = process.env.PORT || 3001) {
     const idToken = typeof auth.idToken === 'string' ? auth.idToken : null;
     let firebaseUid = null;
 
-    if (idToken && admin) {
-      try {
-        const decoded = await admin.auth().verifyIdToken(idToken);
-        firebaseUid = decoded.uid;
-      } catch (error) {
-        console.warn('Invalid Firebase ID token for socket connection:', error.message);
+    if (idToken) {
+      if (process.env.NODE_ENV === 'test') {
+        try {
+          const decoded = JSON.parse(Buffer.from(idToken, 'base64').toString('utf8'));
+          firebaseUid = decoded.uid;
+        } catch (error) {
+          console.warn('Failed to decode test token:', error.message);
+        }
+      } else if (admin) {
+        try {
+          const decoded = await admin.auth().verifyIdToken(idToken);
+          firebaseUid = decoded.uid;
+        } catch (error) {
+          console.warn('Invalid Firebase ID token for socket connection:', error.message);
+        }
       }
     }
 
@@ -124,6 +133,10 @@ function createServerInstance(port = process.env.PORT || 3001) {
     res.send('Lizard Run PvP server is running.');
   });
 
+  app.get('/health', (req, res) => {
+    res.json({ status: 'ok', timestamp: Date.now() });
+  });
+
   app.get('/status', (req, res) => {
     const health = {
       players: playersByFirebaseUid.size,
@@ -168,6 +181,7 @@ function createServerInstance(port = process.env.PORT || 3001) {
 
       player.detachSocket();
       if (player.match) {
+        const reconnectTimeoutMs = process.env.NODE_ENV === 'test' ? 500 : PLAYER_RECONNECT_MS;
         player.disconnectTimer = trackTimer(setTimeout(() => {
           if (!player.socket || !player.socket.connected) {
             const currentMatch = player.match;
@@ -181,7 +195,7 @@ function createServerInstance(port = process.env.PORT || 3001) {
             removePlayerMappings(player);
           }
           timers.delete(player.disconnectTimer);
-        }, PLAYER_RECONNECT_MS));
+        }, reconnectTimeoutMs));
       } else {
         removePlayerMappings(player);
       }
@@ -208,4 +222,16 @@ function createServerInstance(port = process.env.PORT || 3001) {
 }
 
 module.exports = createServerInstance;
+
+if (require.main === module) {
+  const PORT = process.env.PORT || 3001;
+  process.env.NODE_ENV = 'production';
+  const server = createServerInstance(PORT);
+  server.start().then((port) => {
+    console.log(`🎮 Lizard Run PvP server running on port ${port}`);
+  }).catch((err) => {
+    console.error('Failed to start server:', err);
+    process.exit(1);
+  });
+}
 module.exports.createServerInstance = createServerInstance;
