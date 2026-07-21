@@ -83,6 +83,9 @@
         <button id="mp-cancel-btn">Cancel</button>
         <button id="mp-back-btn">Back</button>
       </div>
+      <div id="mp-extra">
+        <div id="mp-player-count" aria-live="polite">Players: 0 / 10</div>
+      </div>
       <div id="mp-log"><strong>Match log</strong><div id="mp-log-list"></div></div>
     </div>
   </div>
@@ -165,6 +168,7 @@
 
       <div id="go-buttons">
         <button id="restart-btn">Play Again</button>
+        <button id="go-home-btn">🏠 Home</button>
         <button id="go-store-btn">🛒 Store</button>
       </div>
 
@@ -194,6 +198,18 @@
 <script src="leaderboard.js"></script>
 <script src="multiplayer.js"></script>
 <script src="game.js"></script>
+
+<!-- Pause overlay for single-player -->
+<div id="pause-screen" class="hidden">
+  <div id="pause-content">
+    <h2>Paused</h2>
+    <div class="pause-actions">
+      <button id="pause-resume">Resume</button>
+      <button id="pause-restart">Restart</button>
+      <button id="pause-home">Main Menu</button>
+    </div>
+  </div>
+</div>
 
 <script>
 /* AUTH TABS */

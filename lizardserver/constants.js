@@ -1,9 +1,13 @@
-const TICK_MS = 50; // 20 ticks per second
-const MAX_LOBBY_PLAYERS = 30;
-const MIN_LOBBY_START = 2;
-const LOBBY_COUNTDOWN_MS = 60000;
-const PLAYER_RECONNECT_MS = 30000;
-const MATCH_MAX_DURATION_MS = 5 * 60 * 1000; // 5 minutes
+const TICK_MS = Number(process.env.SERVER_TICK_MS) || 50; // 20 ticks per second
+const MAX_PLAYERS_PER_MATCH = Number(process.env.MAX_PLAYERS_PER_MATCH) || 10;
+const MAX_LOBBY_PLAYERS = MAX_PLAYERS_PER_MATCH;
+// Require exactly 10 players per match by default (can be overridden via env)
+const MIN_PLAYERS_TO_START = Number(process.env.MIN_PLAYERS_TO_START) || 2;
+// Default lobby countdown (ms) when minimum players reached — set to 30s
+const MATCHMAKING_TIMEOUT_MS = Number(process.env.MATCHMAKING_TIMEOUT_MS) || 30000;
+const LOBBY_COUNTDOWN_MS = MATCHMAKING_TIMEOUT_MS;
+const PLAYER_RECONNECT_MS = Number(process.env.RECONNECT_TIMEOUT_MS) || 30000;
+const MATCH_MAX_DURATION_MS = Number(process.env.MATCH_MAX_DURATION_MS) || 5 * 60 * 1000; // 5 minutes
 const LANE_COUNT = 4;
 const TEMP_MIN = 8;
 const TEMP_MAX = 32;
@@ -16,16 +20,17 @@ const MAX_BURST_COOLDOWN = 80;
 const MAX_BURROW_COOLDOWN = 180;
 const MAX_JUMP_COOLDOWN = 80;
 const MAX_ATTACK_COOLDOWN = 120;
-const MAX_INPUTS_PER_SECOND = 60;
+const MAX_INPUTS_PER_SECOND = 45;
 const ATTACK_RANGE = 1;
 const JUMP_HEIGHT = 18;
 const MAX_PREDATOR_DELAY = 24; // ticks
-const MAX_PLAYERS_PER_MATCH = 30;
 
 module.exports = {
   TICK_MS,
+  MAX_PLAYERS_PER_MATCH,
   MAX_LOBBY_PLAYERS,
-  MIN_LOBBY_START,
+  MIN_PLAYERS_TO_START,
+  MATCHMAKING_TIMEOUT_MS,
   LOBBY_COUNTDOWN_MS,
   PLAYER_RECONNECT_MS,
   MATCH_MAX_DURATION_MS,
@@ -44,6 +49,5 @@ module.exports = {
   MAX_INPUTS_PER_SECOND,
   ATTACK_RANGE,
   JUMP_HEIGHT,
-  MAX_PREDATOR_DELAY,
-  MAX_PLAYERS_PER_MATCH
+  MAX_PREDATOR_DELAY
 };

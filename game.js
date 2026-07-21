@@ -13,6 +13,7 @@ const LANE_COUNT   = 4;
 let gameRunning = false;
 let multiplayerMode = false;
 let multiplayerRunning = false;
+let paused = false;
 let mpServerState = null;
 let mpPlayers = {};
 let mpMyId = null;
@@ -56,11 +57,30 @@ new p5(function(p) {
 
     document.getElementById('start-btn').addEventListener('click', () => startGame(false));
     document.getElementById('restart-btn').addEventListener('click', () => startGame(false));
-    document.getElementById('multiplayer-btn').addEventListener('click', () => {
-      if (window.multiplayer && window.multiplayer.show) {
-        window.multiplayer.show();
-      }
+    document.getElementById('go-home-btn').addEventListener('click', () => {
+      gameoverScreen.classList.add('hidden');
+      startScreen.classList.remove('hidden');
+      multiplayerMode = false;
+      multiplayerRunning = false;
     });
+    const multiplayerBtn = document.getElementById('multiplayer-btn');
+    if (multiplayerBtn) {
+      if (window.CONFIG?.ENABLE_MULTIPLAYER) {
+        multiplayerBtn.addEventListener('click', () => {
+          if (window.multiplayer && window.multiplayer.show) {
+            window.multiplayer.show();
+          }
+        });
+      } else {
+        multiplayerBtn.classList.add('hidden');
+      }
+    }
+    if (!window.CONFIG?.ENABLE_LEADERBOARDS) {
+      document.getElementById('leaderboard-btn')?.classList.add('hidden');
+    }
+    if (!window.CONFIG?.ENABLE_STORE) {
+      document.getElementById('store-btn')?.classList.add('hidden');
+    }
 
     // Multiplayer hooks from socket code
     window.onMultiplayerMatchStart = (payload) => {
@@ -78,10 +98,17 @@ new p5(function(p) {
     window.onMultiplayerState = (state) => {
       if (!multiplayerRunning) return;
       mpPlayers = state.players || {};
-      if (mpMyId && mpPlayers[mpMyId]) {
+      if (mpMyId && mpPlayers[mpMyId] && tuatara) {
         const me = mpPlayers[mpMyId];
         score = Math.floor(me.score || 0);
         temp = Number((me.temp || TEMP_START).toFixed(1));
+        tuatara.lane = Math.max(0, Math.min(LANE_COUNT - 1, me.lane || 1));
+        tuatara.targetY = laneY(tuatara.lane);
+        if (tuatara.y == null) tuatara.y = laneY(tuatara.lane);
+        // Sync server-controlled states
+        tuatara.inBurrow = !!me.inBurrow;
+        tuatara.jumpTimer = Math.max(0, Number(me.jumpTimer || 0));
+        tuatara.shieldHits = Number(me.shieldHits || 0);
       }
     };
 
@@ -101,6 +128,25 @@ new p5(function(p) {
       mpPredatorAlert = 'Predator incoming! Dodge now.';
       setTimeout(() => { mpPredatorAlert = ''; }, 2200);
     };
+
+    // Pause UI wiring
+    const pauseScreen = document.getElementById('pause-screen');
+    const pauseResume = document.getElementById('pause-resume');
+    const pauseRestart = document.getElementById('pause-restart');
+    const pauseHome = document.getElementById('pause-home');
+    if (pauseResume) pauseResume.addEventListener('click', () => { paused = false; pauseScreen.classList.add('hidden'); });
+    if (pauseRestart) pauseRestart.addEventListener('click', () => { paused = false; pauseScreen.classList.add('hidden'); startGame(false); });
+    if (pauseHome) pauseHome.addEventListener('click', () => { paused = false; pauseScreen.classList.add('hidden'); gameoverScreen.classList.add('hidden'); startScreen.classList.remove('hidden'); });
+
+    // Toggle pause with Escape or P (single-player only)
+    window.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape' || ev.key === 'p' || ev.key === 'P') {
+        if (multiplayerRunning) return; // don't allow pausing multiplayer
+        paused = !paused;
+        if (pauseScreen) pauseScreen.classList.toggle('hidden', !paused);
+        ev.preventDefault();
+      }
+    });
   };
 
   p.windowResized = function() {
@@ -155,7 +201,11 @@ new p5(function(p) {
       const pl = mpPlayers[id];
       if (!pl) continue;
       const lane = Math.max(0, Math.min(LANE_COUNT - 1, pl.lane || 1));
-      const y = laneY(lane);
+      // Apply server-reported jump/burrow offsets for remote players
+      const baseY = laneY(lane);
+      const jumpTimer = pl.jumpTimer || 0;
+      const jumpOffset = jumpTimer > 0 ? -Math.sin((jumpTimer / 20) * Math.PI) * 18 * sc : 0;
+      const y = baseY + jumpOffset;
       const x = Math.round(100 * scaleX);
       p.push();
       p.translate(x, y);
@@ -184,9 +234,24 @@ new p5(function(p) {
       return;
     }
 
+    // Pause handling (single-player only)
+    if (paused && !multiplayerRunning) {
+      render();
+      drawHUD();
+      return;
+    }
+
     if (multiplayerRunning) {
-      drawBackground();
-      drawGroundLanes();
+      framesSurvived++;
+      score = Math.floor(framesSurvived / 60 * 10);
+      const hoarder = window.LR.equipped.powerup === 'hoarder';
+      earnedThisRun = Math.floor(score / 10) * (hoarder ? 2 : 1);
+      speed = (2.5 + framesSurvived / 2200) * scaleX;
+
+      // In multiplayer the server is authoritative for deaths and many gameplay outcomes.
+      // Client still runs update/render for visuals, but do not apply client-side death.
+      update();
+      render();
       drawMultiplayerPlayers();
       drawHUD();
       return;
@@ -207,13 +272,9 @@ new p5(function(p) {
 
   // ── Update ───────────────────────────────────────────────────────
   function update() {
-    if (multiplayerMode) {
-      return;
-    }
-
     const eq = window.LR.equipped;
 
-    if (!tuatara.inBurrow) {
+    if (!multiplayerRunning && !tuatara.inBurrow) {
       if ((keys['ArrowUp'] || keys['w']) && tuatara.lane > 0) {
         tuatara.lane--;
         tuatara.targetY = laneY(tuatara.lane);
@@ -254,20 +315,33 @@ new p5(function(p) {
       keys['ArrowRight'] = false;
     }
 
+    // Local single-player jump handling
+    if (keys['j'] && tuatara.jumpCooldown === 0 && !tuatara.inBurrow) {
+      tuatara.jumpTimer = 20; // frames
+      tuatara.jumpCooldown = 60;
+      keys['j'] = false;
+    }
+    if (tuatara.jumpTimer > 0) {
+      // Create a vertical offset for rendering (handled in drawLizard)
+      tuatara.jumpTimer--;
+    }
+
     const scrollSpeed = speed + burst;
 
-    for (let z of zones)     z.x -= scrollSpeed;
-    for (let o of obstacles) o.x -= scrollSpeed;
-    zones     = zones.filter(z => z.x + z.w > 0);
-    obstacles = obstacles.filter(o => o.x + tuatara.w * 1.5 > 0);
+    if (!multiplayerRunning) {
+      for (let z of zones)     z.x -= scrollSpeed;
+      for (let o of obstacles) o.x -= scrollSpeed;
+      zones     = zones.filter(z => z.x + z.w > 0);
+      obstacles = obstacles.filter(o => o.x + tuatara.w * 1.5 > 0);
 
-    const lastZ = zones[zones.length - 1];
-    if (!lastZ || lastZ.x + lastZ.w < W + 80) spawnZone(W + 60);
+      const lastZ = zones[zones.length - 1];
+      if (!lastZ || lastZ.x + lastZ.w < W + 80) spawnZone(W + 60);
 
-    const obsOnScreen = obstacles.filter(o => o.x > W - 20).length;
-    const spawnChance = p.map(framesSurvived, 120, 4000, 0.005, 0.022);
-    if (obsOnScreen === 0 && framesSurvived > 120 && p.random() < spawnChance) {
-      spawnObstacle();
+      const obsOnScreen = obstacles.filter(o => o.x > W - 20).length;
+      const spawnChance = p.map(framesSurvived, 120, 4000, 0.005, 0.022);
+      if (obsOnScreen === 0 && framesSurvived > 120 && p.random() < spawnChance) {
+        spawnObstacle();
+      }
     }
 
     const heatMult = eq.powerup === 'coolblood' ? 0.75 : 1.0;
@@ -306,7 +380,7 @@ new p5(function(p) {
 
     if (tuatara.shieldFlash > 0) tuatara.shieldFlash--;
 
-    if (!tuatara.inBurrow) {
+    if (!tuatara.inBurrow && !multiplayerRunning) {
       for (let i = obstacles.length - 1; i >= 0; i--) {
         const o   = obstacles[i];
         const pad = 4 * sc;
@@ -490,12 +564,13 @@ new p5(function(p) {
     const hat  = STORE_ITEMS.hats.find(h => h.id === eq.hat)    || STORE_ITEMS.hats[0];
 
     const tx = tuatara.x, ty = tuatara.y;
+    const jumpOffset = (tuatara.jumpTimer || 0) > 0 ? -Math.sin(((tuatara.jumpTimer || 0) / 20) * Math.PI) * 18 * sc : 0;
     const tw = tuatara.w, th = tuatara.h;
     const legOff = tuatara.frame === 0 ? 3*sc : -3*sc;
     const s = sc;
 
     p.push();
-    p.translate(tx + tw/2, ty + th/2);
+    p.translate(tx + tw/2, ty + th/2 + jumpOffset);
 
     if (tuatara.inBurrow) {
       p.fill(70,50,25,150); p.noStroke();
@@ -729,9 +804,14 @@ new p5(function(p) {
       if (k === 40) window.multiplayer.socket.emit('input', { type: 'lane', lane: Math.min(LANE_COUNT - 1, (mpPlayers[mpMyId]?.lane || 1) + 1) });
       if (k === 39) window.multiplayer.socket.emit('input', { type: 'burst' });
       if (k === 32) window.multiplayer.socket.emit('input', { type: 'burrow' });
-      if ([32,38,40,39].includes(k)) return false;
+      if (k === 65) window.multiplayer.socket.emit('input', { type: 'attack' });
+      if (k === 70) window.multiplayer.socket.emit('input', { type: 'flick_predator' });
+      if (k === 74) window.multiplayer.socket.emit('input', { type: 'jump' });
+      if ([32,38,40,39,65,70,74].includes(k)) return false;
       return;
     }
+    // Local single-player jump key
+    if (k === 74) keys['j'] = true;
 
     if (k===38) keys['ArrowUp']    = true;
     if (k===40) keys['ArrowDown']  = true;

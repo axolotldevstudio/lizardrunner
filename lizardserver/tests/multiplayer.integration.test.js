@@ -8,6 +8,14 @@ function makeIdToken(uid) {
   return Buffer.from(JSON.stringify({ uid, role: 'test' })).toString('base64');
 }
 
+function raceWithTimeout(promise, ms, message) {
+  let timeoutHandle;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutHandle = setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutHandle));
+}
+
 async function connectClient(port, uid) {
   const client = Client(`http://localhost:${port}`, {
     transports: ['websocket'],
@@ -16,10 +24,11 @@ async function connectClient(port, uid) {
     forceNew: true
   });
 
-  const payload = await Promise.race([
+  const payload = await raceWithTimeout(
     new Promise((resolve) => client.once('connected', resolve)),
-    new Promise((_, reject) => setTimeout(() => reject(new Error(`Client ${uid} timeout`)), 10000))
-  ]);
+    10000,
+    `Client ${uid} timeout`
+  );
 
   return { client, payload };
 }
@@ -37,17 +46,12 @@ describe('multiplayer integration', () => {
 
   afterAll(async () => {
     if (server) {
-      await new Promise((resolve) => {
-        server.io.disconnectSockets();
-        setTimeout(async () => {
-          try {
-            await server.close();
-          } catch (e) {
-            console.error('Error closing server:', e);
-          }
-          resolve();
-        }, 100);
-      });
+      server.io.of('/').disconnectSockets(true);
+      try {
+        await server.close();
+      } catch (e) {
+        console.error('Error closing server:', e);
+      }
     }
   });
 
@@ -73,15 +77,17 @@ describe('multiplayer integration', () => {
     clientA.emit('find_match');
     clientB.emit('find_match');
 
-    const lobbyUpdateA = await Promise.race([
+    const lobbyUpdateA = await raceWithTimeout(
       new Promise((resolve) => clientA.once('lobby_update', resolve)),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Lobby update timeout')), 5000))
-    ]);
+      5000,
+      'Lobby update timeout'
+    );
 
-    const lobbyUpdateB = await Promise.race([
+    const lobbyUpdateB = await raceWithTimeout(
       new Promise((resolve) => clientB.once('lobby_update', resolve)),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Lobby update timeout')), 5000))
-    ]);
+      5000,
+      'Lobby update timeout'
+    );
 
     expect(lobbyUpdateA.status).toBeDefined();
     expect(lobbyUpdateB.status).toBeDefined();
@@ -104,10 +110,11 @@ describe('multiplayer integration', () => {
     players.forEach((p) => p.client.emit('find_match'));
 
     const matchStartPromises = players.map((p) =>
-      Promise.race([
+      raceWithTimeout(
         new Promise((resolve) => p.client.once('match_start', resolve)),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Match start timeout')), 10000))
-      ])
+        10000,
+        'Match start timeout'
+      )
     );
 
     const matchStarts = await Promise.all(matchStartPromises);
@@ -130,15 +137,17 @@ describe('multiplayer integration', () => {
     clientA.emit('find_match');
     clientB.emit('find_match');
 
-    const matchStart = await Promise.race([
+    const matchStart = await raceWithTimeout(
       new Promise((resolve) => clientA.once('match_start', resolve)),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Match start timeout')), 10000))
-    ]);
+      10000,
+      'Match start timeout'
+    );
 
-    const gameState = await Promise.race([
+    const gameState = await raceWithTimeout(
       new Promise((resolve) => clientA.once('state', resolve)),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('State timeout')), 5000))
-    ]);
+      5000,
+      'State timeout'
+    );
 
     expect(gameState.players).toBeDefined();
     expect(typeof gameState.players).toBe('object');
@@ -157,10 +166,11 @@ describe('multiplayer integration', () => {
     clientA.emit('find_match');
     clientB.emit('find_match');
 
-    await Promise.race([
+    await raceWithTimeout(
       new Promise((resolve) => clientA.once('match_start', resolve)),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Match start timeout')), 10000))
-    ]);
+      10000,
+      'Match start timeout'
+    );
 
     clientA.emit('input', { lane: -1, action: 'invalid' });
     clientA.emit('input', { lane: 999, action: 'jump' });

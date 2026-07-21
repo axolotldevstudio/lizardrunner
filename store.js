@@ -107,6 +107,9 @@ let currentTab = 'skins';
 let previewSelected = null; // id of item being previewed
 
 function openStore() {
+  if (!window.CONFIG?.ENABLE_STORE) {
+    return;
+  }
   document.getElementById('store-screen').classList.remove('hidden');
   document.getElementById('start-screen').classList.add('hidden');
   document.getElementById('gameover-screen').classList.add('hidden');
@@ -413,13 +416,18 @@ document.addEventListener('DOMContentLoaded', () => {
   loadData();
   updateScalesDisplay();
 
-  document.getElementById('store-btn').addEventListener('click', () => openStore());
-  document.getElementById('go-store-btn').addEventListener('click', () => openStore());
+  if (!window.CONFIG?.ENABLE_STORE) {
+    document.getElementById('store-btn')?.classList.add('hidden');
+    document.getElementById('go-store-btn')?.classList.add('hidden');
+  }
+
+  document.getElementById('store-btn')?.addEventListener('click', () => openStore());
+  document.getElementById('go-store-btn')?.addEventListener('click', () => openStore());
   document.getElementById('store-close').addEventListener('click', () => {
     const fromGO = !document.getElementById('gameover-screen').classList.contains('hidden') ||
                    window._storeFromGameover;
     closeStore(window._storeFromGameover);
-    window._storeFromGameover = false; 
+    window._storeFromGameover = false;  
   });
 
   document.querySelectorAll('.tab-btn').forEach(btn => {

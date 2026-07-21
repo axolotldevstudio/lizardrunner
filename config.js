@@ -23,7 +23,7 @@ const CONFIG = (() => {
     ENABLE_STORE: true,
     
     // Gameplay constants
-    MAX_LOBBY_PLAYERS: 30,
+    MAX_LOBBY_PLAYERS: 10,
     MIN_LOBBY_PLAYERS: 2,
     
     // Display

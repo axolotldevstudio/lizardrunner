@@ -30,12 +30,24 @@ function setStatus(text, type = 'info') {
 }
 
 function resetMultiplayerUi() {
+  if (!window.CONFIG?.ENABLE_MULTIPLAYER) {
+    setStatus('Multiplayer disabled', 'error');
+    mpConnectBtn.disabled = true;
+    mpFindBtn.disabled = true;
+    mpCancelBtn.disabled = true;
+    return;
+  }
+
   setStatus('Not connected');
   mpFindBtn.disabled = true;
   mpCancelBtn.disabled = true;
 }
 
 async function connectMultiplayer() {
+  if (!window.CONFIG?.ENABLE_MULTIPLAYER) {
+    setStatus('Multiplayer disabled', 'error');
+    return;
+  }
   let serverUrl = mpServerInput.value.trim();
   
   // Use config URL if no server URL is manually entered
@@ -68,6 +80,9 @@ async function connectMultiplayer() {
     reconnectionDelayMax: 5000,
     reconnectionAttempts: 5
   });
+  if (window.multiplayer) {
+    window.multiplayer.socket = socket;
+  }
 
   socket.on('connect', () => {
     connected = true;
@@ -75,6 +90,14 @@ async function connectMultiplayer() {
     mpFindBtn.disabled = false;
     mpCancelBtn.disabled = true;
     logMultiplayer('Connected to server');
+  });
+
+  socket.on('connect_error', (error) => {
+    connected = false;
+    setStatus(`Connect failed: ${error.message}`, 'error');
+    mpFindBtn.disabled = true;
+    mpCancelBtn.disabled = true;
+    logMultiplayer(`Connect error: ${error.message}`);
   });
 
   socket.on('connected', (payload) => {
@@ -88,12 +111,18 @@ async function connectMultiplayer() {
     const countdown = payload.countdownMs != null ? ` | ${Math.ceil(payload.countdownMs / 1000)}s left` : '';
     setStatus(`Lobby ${payload.status} (${payload.count}/${payload.maxPlayers})${countdown}`, 'info');
     logMultiplayer(`Lobby update: ${payload.status}, ${payload.count}/${payload.maxPlayers}`);
+    // Update player count display if present
+    const pc = document.getElementById('mp-player-count');
+    if (pc) pc.textContent = `Players: ${payload.count} / ${payload.maxPlayers}`;
   });
 
   socket.on('disconnect', () => {
     connected = false;
     waiting = false;
     matchId = null;
+    if (window.multiplayer) {
+      window.multiplayer.socket = null;
+    }
     resetMultiplayerUi();
     logMultiplayer('Disconnected from server');
   });
@@ -136,14 +165,11 @@ async function connectMultiplayer() {
   });
 
   socket.on('predator_incoming', (data) => {
+    if (!data || !window.multiplayer) return;
+    if (data.targetId !== window.multiplayer.playerId) return;
     if (window.onMultiplayerPredatorIncoming) {
       window.onMultiplayerPredatorIncoming(data);
     }
-  });
-
-  socket.on('connect_error', (error) => {
-    setStatus(`Connect failed: ${error.message}`, 'error');
-    logMultiplayer(`Connect error: ${error.message}`);
   });
 }
 
@@ -166,6 +192,10 @@ function cancelFind() {
 }
 
 function showMultiplayerScreen() {
+  if (!window.CONFIG?.ENABLE_MULTIPLAYER) {
+    setStatus('Multiplayer is disabled in this build', 'error');
+    return;
+  }
   document.getElementById('start-screen').classList.add('hidden');
   document.getElementById('gameover-screen').classList.add('hidden');
   document.getElementById('multiplayer-screen').classList.remove('hidden');
@@ -181,14 +211,23 @@ mpFindBtn.addEventListener('click', findMatch);
 mpCancelBtn.addEventListener('click', cancelFind);
 mpBackBtn.addEventListener('click', hideMultiplayerScreen);
 
-document.getElementById('multiplayer-btn').addEventListener('click', showMultiplayerScreen);
+document.getElementById('multiplayer-btn')?.addEventListener('click', showMultiplayerScreen);
 
-resetMultiplayerUi();
+function initMultiplayerUi() {
+  resetMultiplayerUi();
+  mpBackBtn.disabled = false;
+}
 
 window.multiplayer = {
-  get socket() { return socket; },
-  isConnected() { return connected; },
-  getMatchId() { return matchId; },
+  socket,
+  playerId: null,
+  isConnected: () => connected,
+  getMatchId: () => matchId,
+  connect: connectMultiplayer,
+  findMatch,
+  cancelFind,
   show: showMultiplayerScreen,
-  hide: hideMultiplayerScreen
+  hide: hideMultiplayerScreen,
 };
+
+initMultiplayerUi();

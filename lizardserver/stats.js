@@ -1,6 +1,6 @@
 // lizardserver/stats.js - Server-authoritative multiplayer stats tracking
 
-const { rtdb } = require('./firebase');
+const firebase = require('./firebase');
 
 /**
  * Submit match results to Firebase
@@ -9,26 +9,39 @@ const { rtdb } = require('./firebase');
  * @param {Array} players - Player objects from match
  * @param {Array} winnerIds - IDs of winning players
  */
-async function submitMatchResults(matchId, players, winnerIds) {
+async function resolveUsername(uid) {
+  const rtdb = firebase.getRtdb();
+  if (!rtdb) return null;
+  try {
+    const snapshot = await rtdb.ref(`users/${uid}/username`).once('value');
+    return snapshot.exists() ? snapshot.val() : null;
+  } catch (err) {
+    console.warn('[STATS] Failed to resolve username for uid', uid, err.message);
+    return null;
+  }
+}
+
+async function submitMatchResults(matchId, players, winnerIds, startedAt = Date.now()) {
+  const rtdb = firebase.getRtdb();
   if (!rtdb) {
-    console.warn('[STATS] Firebase Realtime Database not initialized, skipping stats submission');
+    if (process.env.NODE_ENV !== 'test') {
+      console.warn('[STATS] Firebase Realtime Database not initialized, skipping stats submission');
+    }
     return;
   }
 
   try {
     const timestamp = Date.now();
-    const matchDuration = Math.floor((timestamp - (players[0]?.matchStartTime || timestamp)) / 1000);
-
-    // Calculate placement for each player
+    const matchDuration = Math.floor((timestamp - startedAt) / 1000);
     const placements = calculatePlacements(players, winnerIds);
 
-    // Store per-player stats
     for (const player of players) {
       if (!player.firebaseUid) continue;
 
       const placement = placements[player.id];
       const isWinner = winnerIds.includes(player.id);
       const kills = player.kills || 0;
+      const username = await resolveUsername(player.firebaseUid) || `Player_${player.firebaseUid.slice(0, 6)}`;
 
       const statsEntry = {
         matchId,
@@ -37,20 +50,18 @@ async function submitMatchResults(matchId, players, winnerIds) {
         kills,
         score: Math.floor(player.score || 0),
         survived: Math.floor(matchDuration),
-        won: isWinner
+        won: isWinner,
+        username,
       };
 
-      // Store in /multiplayer/players/{uid}/matches/{matchId}
       await rtdb.ref(`multiplayer/players/${player.firebaseUid}/matches/${matchId}`).set({
         ...statsEntry,
         serverVerified: true
       });
 
-      // Update user's aggregate stats in /multiplayer/stats/{uid}
-      await updatePlayerStats(player.firebaseUid, placement, isWinner, kills);
+      await updatePlayerStats(player.firebaseUid, placement, isWinner, kills, username);
     }
 
-    // Store match summary in /multiplayer/matches/{matchId}
     await rtdb.ref(`multiplayer/matches/${matchId}`).set({
       timestamp,
       duration: matchDuration,
@@ -73,15 +84,16 @@ async function submitMatchResults(matchId, players, winnerIds) {
  * @param {boolean} won - Did player win?
  * @param {number} kills - Kills in this match
  */
-async function updatePlayerStats(uid, placement, won, kills) {
+async function updatePlayerStats(uid, placement, won, kills, username = null) {
+  const rtdb = firebase.getRtdb();
   if (!rtdb) return;
 
   const statsRef = rtdb.ref(`multiplayer/stats/${uid}`);
 
   return statsRef.transaction((current) => {
     if (!current) {
-      // First match
       return {
+        username: username || `Player_${uid.slice(0, 6)}`,
         matches: 1,
         wins: won ? 1 : 0,
         losses: won ? 0 : 1,
@@ -92,9 +104,9 @@ async function updatePlayerStats(uid, placement, won, kills) {
       };
     }
 
-    // Subsequent matches
     const updated = {
       ...current,
+      username: current.username || username || `Player_${uid.slice(0, 6)}`,
       matches: (current.matches || 0) + 1,
       wins: (current.wins || 0) + (won ? 1 : 0),
       losses: (current.losses || 0) + (won ? 0 : 1),
@@ -104,7 +116,6 @@ async function updatePlayerStats(uid, placement, won, kills) {
       lastMatch: Date.now()
     };
 
-    // Calculate win rate
     updated.winRate = (updated.wins / updated.matches * 100).toFixed(1);
 
     return updated;
@@ -143,6 +154,7 @@ function calculatePlacements(players, winnerIds) {
  * @returns {Promise<Array>} Array of player leaderboard entries
  */
 async function fetchMultiplayerLeaderboard(limit = 10) {
+  const rtdb = firebase.getRtdb();
   if (!rtdb) return [];
 
   try {

@@ -1,6 +1,7 @@
 // firebase.js — Auth + Realtime DB, scores via Firebase Cloud Function
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
+import { getAnalytics } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-analytics.js";
 import {
   getAuth,
   createUserWithEmailAndPassword,
@@ -15,18 +16,20 @@ import {
 const SCORE_FUNCTION_URL = 'https://us-central1-tuatara-5767d.cloudfunctions.net/submitScore';
 
 const firebaseConfig = {
-  apiKey:            "AIzaSyBL_5kSGqnBCmzCvwljFA8T1dV5ttXUC0c",
-  authDomain:        "tuatara-5767d.firebaseapp.com",
-  databaseURL:       "https://tuatara-5767d-default-rtdb.firebaseio.com",
-  projectId:         "tuatara-5767d",
-  storageBucket:     "tuatara-5767d.firebasestorage.app",
+  apiKey: "AIzaSyBL_5kSGqnBCmzCvwljFA8T1dV5ttXUC0c",
+  authDomain: "tuatara-5767d.firebaseapp.com",
+  databaseURL: "https://tuatara-5767d-default-rtdb.firebaseio.com",
+  projectId: "tuatara-5767d",
+  storageBucket: "tuatara-5767d.firebasestorage.app",
   messagingSenderId: "431162836563",
-  appId:             "1:431162836563:web:d8cdec7590c992f22668a6"
+  appId: "1:431162836563:web:d8cdec7590c992f22668a6",
+  measurementId: "G-YTXVNDH06T"
 };
 
-const app  = initializeApp(firebaseConfig);
+const app = initializeApp(firebaseConfig);
+const analytics = getAnalytics(app);
 const auth = getAuth(app);
-const db   = getDatabase(app);
+const db = getDatabase(app);
 
 function ownedObjectToSet(obj) {
   return new Set(Object.keys(obj || {}));
@@ -79,7 +82,7 @@ onAuthStateChanged(auth, async (user) => {
     window.currentUser = {
       uid:       user.uid,
       email:     user.email,
-      username:  data.username || 'Anonymous',
+      username:  data.username || user.displayName || user.email?.split('@')[0] || 'Player',
       joinedAt:  data.joinedAt,
       bestScore: data.bestScore || 0,
     };
@@ -235,8 +238,12 @@ window.fbFetchTopScores = async function(limit = 10) {
   const q    = query(ref(db, 'leaderboard'), orderByChild('score'), limitToLast(limit));
   const snap = await get(q);
   if (!snap.exists()) return [];
+  // Prefer username stored with the score; fall back to sensible alternatives
   return Object.values(snap.val())
-    .map(e => ({ username: e.username || 'Anonymous', score: Number(e.score) || 0 }))
+    .map(e => ({
+      username: e.username || e.displayName || (e.email ? e.email.split('@')[0] : null) || 'Player',
+      score: Number(e.score) || 0
+    }))
     .sort((a, b) => b.score - a.score);
 };
 

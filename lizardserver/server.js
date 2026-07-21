@@ -1,11 +1,12 @@
+require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const { initFirebase, admin } = require('./firebase');
+const { initFirebase, getAdmin, isFirebaseReady } = require('./firebase');
 const Player = require('./player');
 const Match = require('./game');
 const Matchmaking = require('./matchmaking');
-const { PLAYER_RECONNECT_MS, MAX_LOBBY_PLAYERS, LOBBY_COUNTDOWN_MS } = require('./constants');
+const { PLAYER_RECONNECT_MS, MAX_LOBBY_PLAYERS, LOBBY_COUNTDOWN_MS, MIN_PLAYERS_TO_START, MAX_PLAYERS_PER_MATCH } = require('./constants');
 const os = require('os');
 
 function createServerInstance(port = process.env.PORT || 3001) {
@@ -50,6 +51,13 @@ function createServerInstance(port = process.env.PORT || 3001) {
 
   initFirebase();
 
+  // Log matchmaking config for easier debugging
+  console.log('[SERVER] Matchmaking config:', {
+    MIN_PLAYERS_TO_START: Number(process.env.MIN_PLAYERS_TO_START) || MIN_PLAYERS_TO_START,
+    MAX_PLAYERS_PER_MATCH: Number(process.env.MAX_PLAYERS_PER_MATCH) || MAX_LOBBY_PLAYERS,
+    LOBBY_COUNTDOWN_MS: Number(process.env.MATCHMAKING_TIMEOUT_MS) || LOBBY_COUNTDOWN_MS
+  });
+
   const playersByFirebaseUid = new Map();
   const matches = new Map();
   const timers = new Set();
@@ -64,9 +72,17 @@ function createServerInstance(port = process.env.PORT || 3001) {
   }
 
   async function getPlayer(socket) {
-    const auth = socket.handshake.auth || {};
+    let auth = socket.handshake.auth || {};
+    if (typeof auth === 'string') {
+      try {
+        auth = JSON.parse(auth);
+      } catch (err) {
+        auth = {};
+      }
+    }
     const idToken = typeof auth.idToken === 'string' ? auth.idToken : null;
     let firebaseUid = null;
+    const adminClient = getAdmin();
 
     if (idToken) {
       if (process.env.NODE_ENV === 'test') {
@@ -76,9 +92,9 @@ function createServerInstance(port = process.env.PORT || 3001) {
         } catch (error) {
           console.warn('Failed to decode test token:', error.message);
         }
-      } else if (admin) {
+      } else if (adminClient) {
         try {
-          const decoded = await admin.auth().verifyIdToken(idToken);
+          const decoded = await adminClient.auth().verifyIdToken(idToken);
           firebaseUid = decoded.uid;
         } catch (error) {
           console.warn('Invalid Firebase ID token for socket connection:', error.message);
@@ -158,8 +174,11 @@ function createServerInstance(port = process.env.PORT || 3001) {
 
     socket.on('find_match', () => {
       matchmaking.joinQueue(player);
-      if (player.lobby && ['waiting', 'starting'].includes(player.lobby.status)) {
-        socket.emit('waiting');
+      if (player.lobby) {
+        socket.emit('lobby_update', getLobbyPayload(player));
+        if (['waiting', 'starting'].includes(player.lobby.status)) {
+          socket.emit('waiting');
+        }
       }
     });
 
@@ -168,6 +187,11 @@ function createServerInstance(port = process.env.PORT || 3001) {
     });
 
     socket.on('input', (payload) => {
+      // Basic validation and rate limiting happen in Player.applyInput / Match.handleInput
+      if (!payload || typeof payload !== 'object') return;
+      // Prevent malformed input types
+      if (typeof payload.type !== 'string') return;
+      player.updateLastSeen();
       if (player.match) {
         player.match.handleInput(player.firebaseUid, payload);
       }
@@ -211,6 +235,13 @@ function createServerInstance(port = process.env.PORT || 3001) {
     close: () => new Promise((resolve) => {
       timers.forEach((timer) => clearTimeout(timer));
       timers.clear();
+      matchmaking.lobbies.forEach((lobby) => {
+        lobby.cancelCountdown?.();
+      });
+      matchmaking.lobbies.clear();
+      matches.forEach((match) => match.stop?.());
+      matches.clear();
+      io.of('/').disconnectSockets(true);
       io.close(() => {
         httpServer.close(() => resolve());
       });

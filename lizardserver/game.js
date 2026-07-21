@@ -27,6 +27,7 @@ class Match {
     this.id = `match_${Math.random().toString(36).slice(2, 10)}`;
     this.state = 'waiting';
     this.tickRate = 1000 / TICK_MS;
+    this.broadcastFrequency = Math.max(1, Math.round(100 / TICK_MS));
     this.mapSeed = Math.floor(Math.random() * 1e9);
     this.onFinished = onFinished;
     this.players.forEach((player) => {
@@ -37,6 +38,11 @@ class Match {
 
   start() {
     this.state = 'running';
+    const startedAt = Date.now();
+    this.startedAt = startedAt;
+    this.players.forEach((player) => {
+      player.matchStartTime = startedAt;
+    });
     const payload = {
       matchId: this.id,
       state: this.state,
@@ -128,7 +134,9 @@ class Match {
     this.resolveAttacks();
     this.resolvePredators();
     this.updateScores();
-    this.broadcastState();
+    if (this.frame % this.broadcastFrequency === 0) {
+      this.broadcastState();
+    }
     this.checkGameEnd();
   }
 
@@ -187,7 +195,7 @@ class Match {
     });
     
     // Submit results to Firebase (server-authoritative)
-    submitMatchResults(this.id, this.players, winnerIds).catch(err => {
+    submitMatchResults(this.id, this.players, winnerIds, this.startedAt).catch(err => {
       console.error('[GAME] Failed to submit match results:', err);
     });
 
@@ -196,6 +204,13 @@ class Match {
       player.socket?.leave(this.id);
       player.resetForMatch();
     });
+  }
+
+  stop() {
+    if (this.interval) {
+      clearInterval(this.interval);
+      this.interval = null;
+    }
   }
 }
 

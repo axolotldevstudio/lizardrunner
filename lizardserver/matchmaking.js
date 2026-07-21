@@ -1,5 +1,5 @@
 const Lobby = require('./lobby');
-const { MAX_LOBBY_PLAYERS } = require('./constants');
+const { MAX_PLAYERS_PER_MATCH } = require('./constants');
 
 class Matchmaking {
   constructor(io, onLobbyReady) {
@@ -27,9 +27,6 @@ class Matchmaking {
     if (player.lobby || player.match) return;
     const lobby = this.getOpenLobby();
     lobby.addPlayer(player);
-    if (lobby.players.length >= MAX_LOBBY_PLAYERS) {
-      lobby.startImmediately();
-    }
   }
 
   leaveQueue(player) {

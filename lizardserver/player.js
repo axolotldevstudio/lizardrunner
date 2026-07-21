@@ -52,6 +52,7 @@ class Player {
   resetForMatch() {
     this.state = 'alive';
     this.alive = true;
+    this.matchStartTime = null;
     this.lane = 1;
     this.temp = TEMP_START;
     this.score = 0;
@@ -77,7 +78,11 @@ class Player {
       lane: this.lane,
       temp: Number(this.temp.toFixed(1)),
       score: Number(this.score.toFixed(1)),
-      deathReason: this.deathReason
+      deathReason: this.deathReason,
+      inBurrow: this.inBurrow,
+      jumpTimer: this.jumpTimer || 0,
+      shieldHits: this.shieldHits || 0,
+      kills: this.kills || 0
     };
   }
 
@@ -120,6 +125,7 @@ class Player {
           this.flagViolation('invalid lane');
           return;
         }
+        // Allow small deltas; reject impossible jumps
         if (Math.abs(requestedLane - this.lane) > MAX_LANE_DELTA) {
           this.flagViolation('too fast lane change');
           return;

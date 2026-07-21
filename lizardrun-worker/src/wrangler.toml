@@ -1,8 +1,0 @@
-name = "lizardrun-worker"
-main = "src/index.js"
-compatibility_date = "2024-01-01"
-
-[vars]
-# Public vars go here — secrets go in dashboard or wrangler secret
-
-# Add your allowed origins here

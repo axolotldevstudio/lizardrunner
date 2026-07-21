@@ -1,4 +1,4 @@
-const { LOBBY_COUNTDOWN_MS, MIN_LOBBY_START, MAX_LOBBY_PLAYERS } = require('./constants');
+const { LOBBY_COUNTDOWN_MS, MIN_PLAYERS_TO_START, MAX_LOBBY_PLAYERS } = require('./constants');
 
 function makeLobbyId() {
   return 'lobby_' + Math.random().toString(36).slice(2, 10);
@@ -23,6 +23,7 @@ class Lobby {
     this.players.push(player);
     player.lobby = this;
     this.broadcastUpdate();
+    console.log(`[LOBBY] player ${player.id} joined lobby ${this.id} (${this.players.length}/${MAX_LOBBY_PLAYERS})`);
     this.evaluateStart();
   }
 
@@ -31,18 +32,23 @@ class Lobby {
     if (player.lobby === this) {
       player.lobby = null;
     }
-    if (this.players.length < MIN_LOBBY_START) {
+    if (this.players.length < MIN_PLAYERS_TO_START) {
       this.cancelCountdown();
     }
     this.broadcastUpdate();
   }
 
   evaluateStart() {
+    // Start immediately once we have the configured max players
     if (this.players.length >= MAX_LOBBY_PLAYERS) {
       return this.startImmediately();
     }
-    if (this.players.length >= MIN_LOBBY_START && !this.countdownTimer) {
-      this.startCountdown();
+
+    // By default start immediately when reaching minimum players, but defer to next tick
+    // to avoid race conditions with socket join/state propagation.
+    if (this.players.length >= MIN_PLAYERS_TO_START) {
+      console.log(`[LOBBY] reached MIN_PLAYERS_TO_START (${MIN_PLAYERS_TO_START}) - scheduling immediate start for lobby ${this.id}`);
+      return setImmediate(() => this.startImmediately());
     }
   }
 
@@ -51,7 +57,9 @@ class Lobby {
     this.status = 'starting';
     this.countdownStart = Date.now();
     this.broadcastUpdate();
+    console.log(`[LOBBY] countdown started for lobby ${this.id}: ${this.countdown}ms`);
     this.countdownTimer = setTimeout(() => {
+      console.log(`[LOBBY] countdown expired for lobby ${this.id}, starting match`);
       this.startMatch();
     }, this.countdown);
   }
@@ -76,13 +84,14 @@ class Lobby {
   }
 
   startMatch() {
-    if (this.players.length < MIN_LOBBY_START) {
+    if (this.players.length < MIN_PLAYERS_TO_START) {
       this.status = 'waiting';
       this.broadcastUpdate();
       return;
     }
     this.status = 'started';
     this.broadcastUpdate();
+    console.log(`[LOBBY] startMatch invoked for lobby ${this.id} with ${this.players.length} players`);
     const players = [...this.players];
     this.players.forEach((p) => {
       p.lobby = null;
