@@ -348,39 +348,6 @@ window.fbFetchMultiplayerLeaderboard = async function(limit = 10) {
     return Array.isArray(rows) ? rows.slice(0, limit) : [];
   } catch (err) {
     console.error('[FB] Error fetching multiplayer leaderboard via backend:', err);
-
-    try {
-      const q = query(ref(db, 'multiplayer/stats'), orderByChild('wins'), limitToLast(limit * 2));
-      const snap = await get(q);
-      if (!snap.exists()) return [];
-
-      const players = [];
-      snap.forEach((childSnapshot) => {
-        const uid = childSnapshot.key;
-        const stats = childSnapshot.val();
-        players.push({
-          uid,
-          username: stats.username || `Player_${uid.slice(0, 6)}`,
-          wins: stats.wins || 0,
-          matches: stats.matches || 0,
-          top3Finishes: stats.top3Finishes || 0,
-          totalKills: stats.totalKills || 0,
-          bestPlacement: stats.bestPlacement || 999,
-          winRate: parseFloat(stats.winRate) || 0
-        });
-      });
-
-      players.sort((a, b) => {
-        if (a.wins !== b.wins) return b.wins - a.wins;
-        if (a.top3Finishes !== b.top3Finishes) return b.top3Finishes - a.top3Finishes;
-        if (a.totalKills !== b.totalKills) return b.totalKills - a.totalKills;
-        return a.bestPlacement - b.bestPlacement;
-      });
-
-      return players.slice(0, limit);
-    } catch (fallbackErr) {
-      console.error('[FB] Multiplayer leaderboard fallback failed:', fallbackErr);
-      return [];
-    }
+    return [];
   }
 };
