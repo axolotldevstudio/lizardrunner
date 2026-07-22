@@ -10,7 +10,14 @@ const {
   MAX_BURROW_COOLDOWN,
   MAX_JUMP_COOLDOWN,
   MAX_ATTACK_COOLDOWN,
-  MAX_INPUTS_PER_SECOND
+  MAX_PUSH_COOLDOWN,
+  MAX_INPUTS_PER_SECOND,
+  ENERGY_MAX,
+  ENERGY_START,
+  ENERGY_REGEN_RATE,
+  SPRINT_ENERGY_DRAIN,
+  SPRINT_TEMP_RATE,
+  PUSH_ENERGY_COST
 } = require('./constants');
 
 function clamp(value, min, max) {
@@ -65,6 +72,10 @@ class Player {
     this.jumpTimer = 0;
     this.attackCooldown = 0;
     this.flickCooldown = 0;
+    this.pushCooldown = 0;
+    this.lastInputSeq = -1;
+    this.energy = ENERGY_START;
+    this.sprinting = false;
     this.pendingAttack = false;
     this.deathReason = null;
     this.predatorQueue = [];
@@ -89,6 +100,9 @@ class Player {
       jumpTimer: this.jumpTimer || 0,
       shieldHits: this.shieldHits || 0,
       kills: this.kills || 0,
+      energy: Number(this.energy.toFixed(1)),
+      sprinting: !!this.sprinting,
+      pushCooldown: this.pushCooldown || 0,
       username: this.displayName || `Player_${String(this.id).slice(0,6)}`
     };
   }
@@ -122,6 +136,8 @@ class Player {
     if (!this.alive || this.state !== 'alive') return;
     if (!input || typeof input.type !== 'string') return;
     if (this.inputRateExceeded()) return;
+    if (Number.isInteger(input.seq) && input.seq <= this.lastInputSeq) return;
+    if (Number.isInteger(input.seq)) this.lastInputSeq = input.seq;
     this.recordInput(input);
 
     const type = input.type;
@@ -184,6 +200,26 @@ class Player {
         return 'attack';
       }
 
+      case 'sprint': {
+        if (input.active === false) {
+          this.sprinting = false;
+          return 'sprint_stop';
+        }
+        if (this.energy <= 0) {
+          this.sprinting = false;
+          return 'sprint_stop';
+        }
+        this.sprinting = true;
+        return 'sprint';
+      }
+
+      case 'push': {
+        if (this.pushCooldown > 0 || this.energy < PUSH_ENERGY_COST) return;
+        this.energy = clamp(this.energy - PUSH_ENERGY_COST, 0, ENERGY_MAX);
+        this.pushCooldown = MAX_PUSH_COOLDOWN;
+        return 'push';
+      }
+
       case 'flick_predator': {
         if (this.flickCooldown > 0) return;
         this.flickCooldown = MAX_ATTACK_COOLDOWN;
@@ -214,6 +250,18 @@ class Player {
       if (this.burrowTimer <= 0) {
         this.inBurrow = false;
       }
+    }
+
+    if (this.pushCooldown > 0) this.pushCooldown -= 1;
+
+    if (this.sprinting) {
+      this.energy = clamp(this.energy - SPRINT_ENERGY_DRAIN, 0, ENERGY_MAX);
+      this.temp += SPRINT_TEMP_RATE;
+      if (this.energy <= 0) {
+        this.sprinting = false;
+      }
+    } else {
+      this.energy = clamp(this.energy + ENERGY_REGEN_RATE, 0, ENERGY_MAX);
     }
 
     if (this.jumpTimer > 0) {

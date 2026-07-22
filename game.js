@@ -9,6 +9,11 @@ const TEMP_SAFE_LO = 12;
 const TEMP_SAFE_HI = 20;
 const TEMP_START   = 15;
 const LANE_COUNT   = 4;
+const ENERGY_MAX   = 100;
+const ENERGY_START = 100;
+const ENERGY_REGEN_RATE = 0.6;
+const SPRINT_ENERGY_DRAIN = 1.2;
+const SPRINT_SPEED_MULT = 1.7;
 
 let gameRunning = false;
 let multiplayerMode = false;
@@ -20,6 +25,16 @@ let mpMyId = null;
 let mpMatchId = null;
 let mpPredatorAlert = '';
 let mpObstacles = [];
+let mpLatency = 0;
+let mpServerTickRate = 20;
+let mpRenderPlayers = {};
+let mpPlayerStateHistory = {};
+let mpPingTimer = null;
+let mpPingSamples = [];
+let mpPingAverage = 0;
+let mpPingHighest = 0;
+let mpPingStatus = 'disconnected';
+let mpPingDebugEnabled = false;
 
 new p5(function(p) {
 
@@ -27,7 +42,7 @@ new p5(function(p) {
   let LANE_TOP, LANE_H;
 
   let tuatara, zones, obstacles, particles;
-  let score, temp, speed, framesSurvived, earnedThisRun;
+  let score, temp, energy, speed, framesSurvived, earnedThisRun;
   let keys = {};
   let shieldActive = false;
   let startScreen, gameoverScreen;
@@ -41,6 +56,34 @@ new p5(function(p) {
     LANE_TOP = Math.round(60  * scaleY);
     LANE_H   = Math.round((H - LANE_TOP - Math.round(20 * scaleY)) / LANE_COUNT);
     p.resizeCanvas(W, H);
+  }
+
+  function getPingQuality(latency) {
+    if (!Number.isFinite(latency) || latency <= 0) return { label: '—', icon: '⚪', color: [195, 190, 165] };
+    if (latency <= 80) return { label: 'Good', icon: '🟢', color: [95, 215, 110] };
+    if (latency <= 150) return { label: 'Moderate', icon: '🟡', color: [235, 215, 95] };
+    if (latency <= 250) return { label: 'High', icon: '🟠', color: [235, 150, 70] };
+    return { label: 'Very High', icon: '🔴', color: [225, 80, 70] };
+  }
+
+  function updatePingMeasurement(latency, reason = 'sample') {
+    if (!Number.isFinite(latency) || latency < 0) {
+      mpLatency = 0;
+      mpPingStatus = 'disconnected';
+      return;
+    }
+
+    mpLatency = Math.round(latency);
+    mpPingSamples.push(mpLatency);
+    if (mpPingSamples.length > 8) mpPingSamples.shift();
+    const total = mpPingSamples.reduce((sum, value) => sum + value, 0);
+    mpPingAverage = Math.round(total / mpPingSamples.length);
+    mpPingHighest = Math.max(...mpPingSamples);
+    mpPingStatus = 'connected';
+
+    if (mpPingDebugEnabled && (reason !== 'sample' || mpPingSamples.length % 5 === 0)) {
+      console.debug('[PING]', { reason, ping: mpLatency, average: mpPingAverage, highest: mpPingHighest, status: mpPingStatus });
+    }
   }
 
   // ── Setup ────────────────────────────────────────────────────────
@@ -85,13 +128,59 @@ new p5(function(p) {
     }
 
     // Multiplayer hooks from socket code
+    const bindMultiplayerDiagnostics = () => {
+      const socket = window.multiplayer?.socket;
+      if (!socket || socket.__lrBoundDiagnostics) return;
+      socket.__lrBoundDiagnostics = true;
+      mpPingDebugEnabled = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.CONFIG?.DEBUG === true;
+      socket.on('pong', (payload) => {
+        if (payload?.clientSentAt) {
+          updatePingMeasurement(Math.max(1, Date.now() - payload.clientSentAt), 'pong');
+        }
+      });
+      socket.on('connect', () => {
+        mpPingStatus = 'connecting';
+        mpPingSamples = [];
+        mpPingAverage = 0;
+        mpPingHighest = 0;
+        mpLatency = 0;
+        if (mpPingDebugEnabled) console.debug('[PING] connected');
+      });
+      socket.on('disconnect', () => {
+        mpPingStatus = 'disconnected';
+        mpLatency = 0;
+        if (mpPingDebugEnabled) console.debug('[PING] disconnected');
+      });
+      socket.on('connect_error', () => {
+        mpPingStatus = 'disconnected';
+        mpLatency = 0;
+        if (mpPingDebugEnabled) console.debug('[PING] connection error');
+      });
+      mpPingTimer = setInterval(() => {
+        if (socket.connected) {
+          mpPingStatus = 'connecting';
+          socket.emit('ping', { clientSentAt: Date.now() });
+        } else {
+          mpPingStatus = 'disconnected';
+          mpLatency = 0;
+        }
+      }, 1400);
+    };
+
     window.onMultiplayerMatchStart = (payload) => {
       mpMatchId = payload.matchId;
       mpMyId = payload.myPlayerId || window.multiplayer?.playerId || window.multiplayer?.socket?.id || null;
       mpPlayers = {};
       mpObstacles = [];
+      mpServerTickRate = payload.tickRate || 20;
+      mpPingStatus = 'connecting';
+      mpLatency = 0;
+      mpPingSamples = [];
+      mpPingAverage = 0;
+      mpPingHighest = 0;
       multiplayerMode = true;
       multiplayerRunning = true;
+      bindMultiplayerDiagnostics();
       setTimeout(() => {
         document.getElementById('multiplayer-screen')?.classList.add('hidden');
         startGame(true);
@@ -103,17 +192,48 @@ new p5(function(p) {
       mpPlayers = state.players || {};
       mpObstacles = state.obstacles || [];
       zones = Array.isArray(state.zones) ? state.zones : [];
+      const now = performance.now();
+      const snapshotTime = state.frame ?? now;
+      const incomingPlayers = mpPlayers;
+      Object.entries(incomingPlayers).forEach(([id, pl]) => {
+        if (!pl) return;
+        const prev = mpPlayerStateHistory[id] || null;
+        const next = {
+          lane: Number(pl.lane ?? 1),
+          serverLane: Number(pl.lane ?? 1),
+          y: prev?.y ?? laneY(Number(pl.lane ?? 1)),
+          targetLane: Number(pl.lane ?? 1),
+          receivedAt: now,
+          frame: snapshotTime,
+          alive: pl.alive !== false,
+          username: pl.username || id
+        };
+        if (prev) {
+          next.y = prev.y;
+          next.targetLane = Number(pl.lane ?? prev.serverLane ?? 1);
+        }
+        mpPlayerStateHistory[id] = next;
+      });
       if (mpMyId && mpPlayers[mpMyId] && tuatara) {
         const me = mpPlayers[mpMyId];
         score = Math.floor(me.score || 0);
         temp = Number((me.temp || TEMP_START).toFixed(1));
-        tuatara.lane = Math.max(0, Math.min(LANE_COUNT - 1, me.lane || 1));
-        tuatara.targetY = laneY(tuatara.lane);
-        if (tuatara.y == null) tuatara.y = laneY(tuatara.lane);
+        const serverLane = Math.max(0, Math.min(LANE_COUNT - 1, Number(me.lane ?? tuatara.lane ?? 1)));
+        tuatara.serverLane = serverLane;
+        if (tuatara.predictedLane == null) tuatara.predictedLane = serverLane;
+        if (tuatara.predictedLane !== serverLane) {
+          tuatara.targetY = laneY(serverLane);
+        } else if (tuatara.targetY == null || Math.abs(tuatara.y - laneY(serverLane)) < 2) {
+          tuatara.targetY = laneY(serverLane);
+        }
+        if (tuatara.y == null) tuatara.y = laneY(serverLane);
         // Sync server-controlled states
         tuatara.inBurrow = !!me.inBurrow;
         tuatara.jumpTimer = Math.max(0, Number(me.jumpTimer || 0));
         tuatara.shieldHits = Number(me.shieldHits || 0);
+        tuatara.energy = Number((me.energy ?? ENERGY_START).toFixed(1));
+        tuatara.sprinting = !!me.sprinting;
+        tuatara.pushCooldown = Number(me.pushCooldown || 0);
       }
     };
 
@@ -140,6 +260,10 @@ new p5(function(p) {
       mpPlayers = {};
       mpObstacles = [];
       mpPredatorAlert = '';
+      if (mpPingTimer) {
+        clearInterval(mpPingTimer);
+        mpPingTimer = null;
+      }
       document.getElementById('multiplayer-screen')?.classList.remove('hidden');
       document.getElementById('start-screen')?.classList.remove('hidden');
       document.getElementById('gameover-screen')?.classList.add('hidden');
@@ -201,7 +325,14 @@ new p5(function(p) {
       jumpCooldown: 0, jumpTimer: 0,
       inBurrow: false, burrowTimer: 0,
       shieldHits:  powerup === 'scalemail' ? 1 : 0,
-      shieldFlash: 0
+      shieldFlash: 0,
+      energy: ENERGY_START,
+      sprinting: false,
+      pushCooldown: 0,
+      predictedLane: 1,
+      serverLane: 1,
+      inputSeq: 0,
+      lastInputAt: 0
     };
 
     zones         = [];
@@ -210,6 +341,7 @@ new p5(function(p) {
     score         = 0;
     earnedThisRun = 0;
     temp          = TEMP_START;
+    energy        = ENERGY_START;
     speed         = 2.5 * scaleX;
     framesSurvived = 0;
     shieldActive   = tuatara.shieldHits > 0;
@@ -228,7 +360,11 @@ new p5(function(p) {
     ids.forEach((id, idx) => {
       const pl = mpPlayers[id];
       if (!pl) return;
-      const lane = Math.max(0, Math.min(LANE_COUNT - 1, pl.lane ?? 1));
+      const state = mpPlayerStateHistory[id] || null;
+      const serverLane = Math.max(0, Math.min(LANE_COUNT - 1, Number(pl.lane ?? state?.serverLane ?? 1)));
+      const baseLane = Number(state?.lane ?? serverLane);
+      const blend = Math.min(1, Math.max(0, (performance.now() - (state?.receivedAt || performance.now())) / 120));
+      const lane = Math.max(0, Math.min(LANE_COUNT - 1, state ? baseLane + (serverLane - baseLane) * blend : serverLane));
       const baseY = laneY(lane);
       const jumpTimer = pl.jumpTimer || 0;
       const jumpOffset = jumpTimer > 0 ? -Math.sin((jumpTimer / 20) * Math.PI) * 18 * sc : 0;
@@ -362,7 +498,15 @@ new p5(function(p) {
       }
     }
 
-    tuatara.y += (tuatara.targetY - tuatara.y) * 0.18;
+    if (multiplayerRunning) {
+      const desiredLane = tuatara.predictedLane ?? tuatara.serverLane ?? tuatara.lane;
+      const clampedLane = Math.max(0, Math.min(LANE_COUNT - 1, desiredLane));
+      tuatara.predictedLane = clampedLane;
+      tuatara.lane = clampedLane;
+      tuatara.targetY = laneY(clampedLane);
+    }
+
+    tuatara.y += (tuatara.targetY - tuatara.y) * (multiplayerRunning ? 0.32 : 0.18);
 
     if (tuatara.burrowCooldown > 0) tuatara.burrowCooldown--;
     if (keys[' '] && tuatara.burrowCooldown === 0 && !tuatara.inBurrow) {
@@ -380,6 +524,7 @@ new p5(function(p) {
     }
 
     let burst = 0;
+    let sprinting = false;
     if (tuatara.burstCooldown > 0) tuatara.burstCooldown--;
     const burstCD = eq.powerup === 'sprinter' ? 40 : 80;
     if (keys['ArrowRight'] && tuatara.burstCooldown === 0) {
@@ -389,6 +534,17 @@ new p5(function(p) {
       temp += 1.4;
       keys['ArrowRight'] = false;
     }
+
+    if (keys['Shift'] && tuatara.energy > 0 && !tuatara.inBurrow) {
+      sprinting = true;
+    }
+    if (sprinting) {
+      tuatara.energy = Math.max(0, tuatara.energy - SPRINT_ENERGY_DRAIN);
+      temp += 0.02;
+    } else {
+      tuatara.energy = Math.min(ENERGY_MAX, tuatara.energy + ENERGY_REGEN_RATE);
+    }
+    tuatara.sprinting = sprinting;
 
     // Local single-player jump handling
     if (tuatara.jumpCooldown > 0) tuatara.jumpCooldown--;
@@ -402,7 +558,7 @@ new p5(function(p) {
       tuatara.jumpTimer--;
     }
 
-    const scrollSpeed = speed + burst;
+    const scrollSpeed = (speed + burst) * (sprinting ? SPRINT_SPEED_MULT : 1);
 
     if (!multiplayerRunning) {
       for (let z of zones)     z.x -= scrollSpeed;
@@ -783,6 +939,31 @@ new p5(function(p) {
     p.fill(fillCol); p.textSize(Math.max(9, Math.round(11*fs))); p.textAlign(p.RIGHT);
     p.text(temp.toFixed(1)+'°C', bx+bw, labelY);
 
+    if (multiplayerRunning) {
+      const pingValue = mpPingStatus === 'connected' ? `${mpLatency || mpPingAverage || 0} ms` : (mpPingStatus === 'connecting' ? '--' : 'DISCONNECTED');
+      const quality = getPingQuality(mpLatency || mpPingAverage || 0);
+      p.textAlign(p.RIGHT);
+      p.fill(195,190,165); p.textSize(Math.max(8, Math.round(9*fs)));
+      p.text('PING', W - Math.round(12*scaleX), Math.round(54*scaleY));
+      p.fill(quality.color[0], quality.color[1], quality.color[2]); p.textSize(Math.max(8, Math.round(9*fs)));
+      p.text(`${pingValue} ${quality.icon}`, W - Math.round(12*scaleX), Math.round(68*scaleY));
+      p.fill(195,190,165,180); p.textSize(Math.max(7, Math.round(8*fs)));
+      p.text(`${mpServerTickRate}Hz`, W - Math.round(12*scaleX), Math.round(82*scaleY));
+    }
+
+    const ebx = bx;
+    const eby = Math.round(40*scaleY);
+    const ebw = Math.round(220*scaleX);
+    const ebh = Math.round(10*scaleY);
+    const energyFill = p.map(tuatara.energy, 0, ENERGY_MAX, 0, ebw);
+    p.fill(28,28,18); p.rect(ebx,eby,ebw,ebh,4);
+    p.fill(95,175,235,170); p.rect(ebx,eby,energyFill,ebh,4);
+    p.noFill(); p.stroke(255,255,255,35); p.strokeWeight(1); p.rect(ebx,eby,ebw,ebh,4); p.noStroke();
+    p.fill(195,190,165); p.textSize(Math.max(8, Math.round(9*fs))); p.textAlign(p.LEFT);
+    p.text('ENERGY', ebx, eby - Math.round(3*scaleY));
+    p.fill(215,205,135); p.textSize(Math.max(8, Math.round(9*fs))); p.textAlign(p.RIGHT);
+    p.text(Math.max(0, Math.round(tuatara.energy)) + '%', ebx+ebw, eby - Math.round(3*scaleY));
+
     // Danger flash
     if (temp >= 29 || temp <= 9.5) {
       const a = p.map(p.sin(p.frameCount*0.18), -1, 1, 0, 55);
@@ -808,6 +989,10 @@ new p5(function(p) {
     p.text('BURROW [SPACE]'+(tuatara.inBurrow?' ↓':burrowReady?' ✓':' '+Math.ceil(tuatara.burrowCooldown/60)+'s'), rx, Math.round(20*scaleY));
     p.fill(burstReady ? p.color(95,175,235) : p.color(115,105,85));
     p.text('BURST [→]'+(burstReady?' ✓':' '+Math.ceil(tuatara.burstCooldown/60)+'s'), rx, Math.round(34*scaleY));
+    p.fill(tuatara.energy > 0 ? p.color(255,215,90) : p.color(115,105,85));
+    p.text('SPRINT [SHIFT]'+(tuatara.energy > 0 ? '' : ' 0%'), rx, Math.round(48*scaleY));
+    p.fill(tuatara.pushCooldown > 0 ? p.color(115,105,85) : p.color(150,220,150));
+    p.text('PUSH [P]'+(tuatara.pushCooldown > 0 ? ' '+Math.ceil(tuatara.pushCooldown/60)+'s' : ''), rx, Math.round(62*scaleY));
 
     if (shieldActive && tuatara.shieldHits > 0) {
       p.fill(100,180,255); p.textSize(Math.max(8, Math.round(9*fs))); p.textAlign(p.RIGHT);
@@ -924,6 +1109,8 @@ new p5(function(p) {
       }
       if (k === 39) { const payload = { type: 'burst' }; console.log('[GAME] emit input', payload); window.multiplayer.socket.emit('input', payload); }
       if (k === 32) { const payload = { type: 'burrow' }; console.log('[GAME] emit input', payload); window.multiplayer.socket.emit('input', payload); }
+      if (k === 16) { const payload = { type: 'sprint', active: true }; console.log('[GAME] emit input', payload); window.multiplayer.socket.emit('input', payload); }
+      if (k === 80) { const payload = { type: 'push' }; console.log('[GAME] emit input', payload); window.multiplayer.socket.emit('input', payload); }
       if (k === 65) { const payload = { type: 'attack' }; console.log('[GAME] emit input', payload); window.multiplayer.socket.emit('input', payload); }
       if (k === 70) { const payload = { type: 'flick_predator' }; console.log('[GAME] emit input', payload); window.multiplayer.socket.emit('input', payload); }
       if (k === 74) { const payload = { type: 'jump' }; console.log('[GAME] emit input', payload); window.multiplayer.socket.emit('input', payload); }
@@ -937,8 +1124,9 @@ new p5(function(p) {
     if (k===40) keys['ArrowDown']  = true;
     if (k===39) keys['ArrowRight'] = true;
     if (k===32) keys[' ']         = true;
+    if (k===16) keys['Shift']     = true;
     if (p.key)  keys[p.key]       = true;
-    if ([32,38,40,39].includes(k)) return false;
+    if ([32,38,40,39,16].includes(k)) return false;
   };
 
   p.keyReleased = function() {
@@ -948,7 +1136,13 @@ new p5(function(p) {
     if (k===40) keys['ArrowDown']  = false;
     if (k===39) keys['ArrowRight'] = false;
     if (k===32) keys[' ']         = false;
+    if (k===16) {
+      keys['Shift'] = false;
+      if (multiplayerRunning && window.multiplayer?.socket) {
+        window.multiplayer.socket.emit('input', { type: 'sprint', active: false });
+      }
+    }
     if (p.key)  keys[p.key]       = false;
   };
-  
+
 }); // end p5 instance

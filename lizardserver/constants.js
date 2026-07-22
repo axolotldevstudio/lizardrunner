@@ -21,10 +21,17 @@ const MAX_BURST_COOLDOWN = 80;
 const MAX_BURROW_COOLDOWN = 180;
 const MAX_JUMP_COOLDOWN = 80;
 const MAX_ATTACK_COOLDOWN = 120;
+const MAX_PUSH_COOLDOWN = 240;
 const MAX_INPUTS_PER_SECOND = 45;
 const ATTACK_RANGE = 1;
 const JUMP_HEIGHT = 18;
 const MAX_PREDATOR_DELAY = 24; // ticks
+const ENERGY_MAX = 100;
+const ENERGY_START = 100;
+const ENERGY_REGEN_RATE = 0.6;
+const SPRINT_ENERGY_DRAIN = 1.2;
+const SPRINT_TEMP_RATE = 0.02;
+const PUSH_ENERGY_COST = 10;
 
 // ── Environment hazards (rats/stoats/cats) ──────────────────────────
 // Obstacles are modeled in ticks, not pixels, so they render consistently
@@ -55,9 +62,16 @@ module.exports = {
   MAX_BURROW_COOLDOWN,
   MAX_JUMP_COOLDOWN,
   MAX_ATTACK_COOLDOWN,
+  MAX_PUSH_COOLDOWN,
   MAX_INPUTS_PER_SECOND,
   ATTACK_RANGE,
   JUMP_HEIGHT,
+  ENERGY_MAX,
+  ENERGY_START,
+  ENERGY_REGEN_RATE,
+  SPRINT_ENERGY_DRAIN,
+  SPRINT_TEMP_RATE,
+  PUSH_ENERGY_COST,
   MAX_PREDATOR_DELAY,
   OBSTACLE_TRAVEL_TICKS,
   OBSTACLE_WARMUP_TICKS,

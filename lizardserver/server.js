@@ -353,6 +353,10 @@ function createServerInstance(port = process.env.PORT || 3001) {
       }
     });
 
+    socket.on('ping', (payload) => {
+      socket.emit('pong', payload);
+    });
+
     socket.on('cancel_find', () => {
       matchmaking.leaveQueue(player);
     });

@@ -31,7 +31,7 @@ class Match {
     this.id = `match_${Math.random().toString(36).slice(2, 10)}`;
     this.state = 'waiting';
     this.tickRate = 1000 / TICK_MS;
-    this.broadcastFrequency = Math.max(1, Math.round(100 / TICK_MS));
+    this.broadcastFrequency = Math.max(1, Math.round(60 / TICK_MS));
     this.mapSeed = Math.floor(Math.random() * 1e9);
     this.onFinished = onFinished;
 
@@ -128,7 +128,27 @@ class Match {
       this.applyAttack(player);
     } else if (action === 'flick_predator') {
       this.applyFlick(player);
+    } else if (action === 'push') {
+      this.applyPush(player);
     }
+  }
+
+  applyPush(attacker) {
+    if (!attacker.alive) return;
+    const target = this.players.find((player) => player !== attacker && player.alive);
+    if (!target) return;
+    const laneDelta = Math.abs(target.lane - attacker.lane);
+    if (laneDelta > 1) return;
+
+    const direction = Math.random() < 0.5 ? -1 : 1;
+    const candidateLane = target.lane + direction;
+    if (candidateLane < 0 || candidateLane >= LANE_COUNT) return;
+    target.lane = candidateLane;
+    this.io.to(this.id).emit('push_result', {
+      attackerId: attacker.id,
+      targetId: target.id,
+      targetLane: target.lane
+    });
   }
 
   applyAttack(attacker) {
