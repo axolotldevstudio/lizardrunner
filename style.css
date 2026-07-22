@@ -92,6 +92,19 @@ html, body {
 }
 #start-content::-webkit-scrollbar { display: none; }
 
+#copyright-notice {
+  position: fixed;
+  right: 12px;
+  bottom: 10px;
+  z-index: 30;
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  color: rgba(240, 230, 204, 0.72);
+  text-transform: uppercase;
+  pointer-events: none;
+  user-select: none;
+}
+
 #logo-lizard {
   font-size: 3.2rem;
   line-height: 1;
