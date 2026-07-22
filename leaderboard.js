@@ -69,12 +69,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const li = document.createElement('li');
         li.className = 'lb-row lb-mp' + (i < 3 ? ' lb-top' : '');
         const isMe = window.currentUser && r.username === window.currentUser.username;
+        const winRate = Number(r.winRate) || 0;
         li.innerHTML = `
           <span class="lb-rank">${medals[i] || (i + 1)}</span>
           <span class="lb-name${isMe ? ' lb-me' : ''}">${r.username}</span>
           <span class="lb-stat">${r.wins}W</span>
           <span class="lb-stat">${r.matches}M</span>
-          <span class="lb-stat">${r.winRate.toFixed(0)}%</span>
+          <span class="lb-stat">${winRate.toFixed(0)}%</span>
         `;
         listEl.appendChild(li);
       });

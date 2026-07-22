@@ -102,6 +102,7 @@ new p5(function(p) {
       if (!multiplayerRunning) return;
       mpPlayers = state.players || {};
       mpObstacles = state.obstacles || [];
+      zones = Array.isArray(state.zones) ? state.zones : [];
       if (mpMyId && mpPlayers[mpMyId] && tuatara) {
         const me = mpPlayers[mpMyId];
         score = Math.floor(me.score || 0);
@@ -881,12 +882,13 @@ new p5(function(p) {
     lbMsg.classList.add('hidden');
     if (window.fbSubmitScore && score > 0) {
       try {
-        const prevBest = window.currentUser?.bestScore || 0;
+        const prevBest = Math.max(window.currentUser?.bestScore || 0, window.LR?.best || 0);
         const result = await window.fbSubmitScore(score);
-        if (result?.newBest !== undefined && window.currentUser) {
-          window.currentUser.bestScore = result.newBest;
+        const serverBest = Number(result?.newBest ?? window.LR?.best ?? score);
+        if (window.currentUser) {
+          window.currentUser.bestScore = Math.max(window.currentUser.bestScore || 0, serverBest);
         }
-        if (score > prevBest) {
+        if (serverBest > prevBest) {
           lbMsg.textContent = '🏆 New leaderboard best saved!';
           lbMsg.classList.remove('hidden');
         }

@@ -7,10 +7,12 @@ const Player = require('./player');
 const Match = require('./game');
 const Matchmaking = require('./matchmaking');
 const { PLAYER_RECONNECT_MS, MAX_LOBBY_PLAYERS, LOBBY_COUNTDOWN_MS, MIN_PLAYERS_TO_START, MAX_PLAYERS_PER_MATCH } = require('./constants');
+const { fetchMultiplayerLeaderboard } = require('./stats');
 const os = require('os');
 
 function createServerInstance(port = process.env.PORT || 3001) {
   const app = express();
+  app.use(express.json());
   const httpServer = http.createServer(app);
   const allowedOrigins = (
     process.env.ALLOWED_ORIGINS ||
@@ -21,7 +23,11 @@ function createServerInstance(port = process.env.PORT || 3001) {
     .filter(Boolean);
 
   const isAllowedOrigin = (origin) => {
-    if (!origin) {
+    if (!origin || origin === 'null') {
+      return true;
+    }
+
+    if (origin.startsWith('file://')) {
       return true;
     }
 
@@ -68,6 +74,16 @@ function createServerInstance(port = process.env.PORT || 3001) {
       },
       methods: ['GET', 'POST']
     }
+  });
+
+  app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    if (req.method === 'OPTIONS') {
+      return res.sendStatus(204);
+    }
+    next();
   });
 
   initFirebase();
@@ -208,6 +224,106 @@ function createServerInstance(port = process.env.PORT || 3001) {
       timestamp: Date.now()
     };
     res.json(health);
+  });
+
+  app.get('/leaderboard/multiplayer', async (req, res) => {
+    try {
+      const limit = Math.max(1, Math.min(Number(req.query.limit || 10), 20));
+      const rows = await fetchMultiplayerLeaderboard(limit);
+      res.json(rows);
+    } catch (err) {
+      console.error('[SERVER] Failed to serve multiplayer leaderboard:', err);
+      res.status(500).json({ error: 'Failed to load multiplayer leaderboard' });
+    }
+  });
+
+  app.get('/leaderboard/singleplayer', async (req, res) => {
+    try {
+      const limit = Math.max(1, Math.min(Number(req.query.limit || 10), 20));
+      const adminClient = getAdmin();
+      const rtdb = getRtdb();
+
+      if (!adminClient || !rtdb) {
+        return res.status(503).json({ error: 'Firebase services unavailable' });
+      }
+
+      const snap = await rtdb.ref('leaderboard').orderByChild('score').limitToLast(limit).once('value');
+      if (!snap.exists()) {
+        return res.json([]);
+      }
+
+      const rows = Object.values(snap.val())
+        .map((entry) => ({
+          username: entry.username || entry.displayName || 'Player',
+          score: Number(entry.score) || 0,
+          uid: entry.uid || null,
+          updatedAt: entry.updatedAt || null,
+        }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, limit);
+
+      res.json(rows);
+    } catch (err) {
+      console.error('[SERVER] Failed to serve single-player leaderboard:', err);
+      res.status(500).json({ error: 'Failed to load single-player leaderboard' });
+    }
+  });
+
+  app.post('/score/singleplayer', async (req, res) => {
+    try {
+      const { score, idToken, uid, username } = req.body || {};
+      const scoreValue = Number(score);
+      const adminClient = getAdmin();
+      const rtdb = getRtdb();
+
+      if (!adminClient || !rtdb) {
+        return res.status(503).json({ error: 'Firebase services unavailable' });
+      }
+
+      if (!idToken || !uid || !Number.isFinite(scoreValue) || scoreValue <= 0) {
+        return res.status(400).json({ error: 'Missing scoring payload' });
+      }
+
+      const decoded = await adminClient.auth().verifyIdToken(idToken);
+      const verifiedUid = decoded.uid;
+
+      if (!verifiedUid || verifiedUid !== uid) {
+        return res.status(401).json({ error: 'Unauthorized score submission' });
+      }
+
+      const userSnap = await rtdb.ref(`users/${verifiedUid}/username`).once('value');
+      const displayName = userSnap.val() || username || decoded.name || 'Player';
+      const leaderboardRef = rtdb.ref(`leaderboard/${verifiedUid}`);
+      const existingSnap = await leaderboardRef.once('value');
+      const existing = existingSnap.val() || {};
+      const existingScore = Number(existing.score) || 0;
+
+      if (existingScore >= scoreValue) {
+        return res.json({
+          updated: false,
+          uid: verifiedUid,
+          score: existingScore,
+          username: existing.username || displayName,
+        });
+      }
+
+      await leaderboardRef.set({
+        uid: verifiedUid,
+        username: displayName,
+        score: scoreValue,
+        updatedAt: Date.now(),
+      });
+
+      res.json({
+        updated: true,
+        uid: verifiedUid,
+        username: displayName,
+        score: scoreValue,
+      });
+    } catch (err) {
+      console.error('[SERVER] Failed to save single-player leaderboard entry:', err);
+      res.status(401).json({ error: 'Failed to save leaderboard entry' });
+    }
   });
 
   io.on('connection', async (socket) => {

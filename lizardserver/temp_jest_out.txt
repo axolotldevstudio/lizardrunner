@@ -1,0 +1,369 @@
+  console.log
+    [SERVER] Matchmaking config: {
+      MIN_PLAYERS_TO_START: 2,
+      MAX_PLAYERS_PER_MATCH: 2,
+      LOBBY_COUNTDOWN_MS: 30000
+    }
+
+      at log (server.js:76:11)
+
+  console.log
+    [CORS] Request from: undefined
+
+      at log (server.js:59:17)
+
+  console.log
+    [CORS] Allowed: undefined
+
+      at log (server.js:62:19)
+
+  console.log
+    connected: uid-a firebaseUid= uid-a socketId= TSTp9e7s0IWtj2Q5AAAB
+
+      at Namespace.log (server.js:215:13)
+
+  console.log
+    [CORS] Request from: undefined
+
+      at log (server.js:59:17)
+
+  console.log
+    [CORS] Allowed: undefined
+
+      at log (server.js:62:19)
+
+  console.log
+    connected: uid-b firebaseUid= uid-b socketId= ykXGiObP4phULFLsAAAD
+
+      at Namespace.log (server.js:215:13)
+
+  console.log
+    disconnected: uid-a
+
+      at Socket.log (server.js:247:15)
+
+  console.log
+    disconnected: uid-b
+
+      at Socket.log (server.js:247:15)
+
+  console.log
+    [CORS] Request from: undefined
+
+      at log (server.js:59:17)
+
+  console.log
+    [CORS] Allowed: undefined
+
+      at log (server.js:62:19)
+
+  console.log
+    connected: uid-c firebaseUid= uid-c socketId= 6FunrwpFmr1fn5XCAAAF
+
+      at Namespace.log (server.js:215:13)
+
+  console.log
+    [CORS] Request from: undefined
+
+      at log (server.js:59:17)
+
+  console.log
+    [CORS] Allowed: undefined
+
+      at log (server.js:62:19)
+
+  console.log
+    connected: uid-d firebaseUid= uid-d socketId= xb9ZeOnnddjkzEyEAAAH
+
+      at Namespace.log (server.js:215:13)
+
+  console.log
+    [LOBBY] player uid-c joined lobby lobby_mi22qm78 (1/2)
+
+      at Lobby.log [as addPlayer] (lobby.js:26:13)
+
+  console.log
+    [LOBBY] player uid-d joined lobby lobby_mi22qm78 (2/2)
+
+      at Lobby.log [as addPlayer] (lobby.js:26:13)
+
+  console.log
+    [LOBBY] short countdown (3000ms) started for lobby lobby_mi22qm78
+
+      at Lobby.log [as startCountdown] (lobby.js:63:13)
+
+  console.log
+    disconnected: uid-c
+
+      at Socket.log (server.js:247:15)
+
+  console.log
+    disconnected: uid-d
+
+      at Socket.log (server.js:247:15)
+
+  console.log
+    [CORS] Request from: undefined
+
+      at log (server.js:59:17)
+
+  console.log
+    [CORS] Allowed: undefined
+
+      at log (server.js:62:19)
+
+  console.log
+    connected: uid-match-0 firebaseUid= uid-match-0 socketId= Io6DvZG0Qyp8_zhPAAAJ
+
+      at Namespace.log (server.js:215:13)
+
+  console.log
+    [CORS] Request from: undefined
+
+      at log (server.js:59:17)
+
+  console.log
+    [CORS] Allowed: undefined
+
+      at log (server.js:62:19)
+
+  console.log
+    connected: uid-match-1 firebaseUid= uid-match-1 socketId= D166mTRJxVLcZmgyAAAL
+
+      at Namespace.log (server.js:215:13)
+
+  console.log
+    [LOBBY] player uid-match-0 joined lobby lobby_r6t9qtqs (1/2)
+
+      at Lobby.log [as addPlayer] (lobby.js:26:13)
+
+  console.log
+    [LOBBY] player uid-match-1 joined lobby lobby_r6t9qtqs (2/2)
+
+      at Lobby.log [as addPlayer] (lobby.js:26:13)
+
+  console.log
+    [LOBBY] short countdown (3000ms) started for lobby lobby_r6t9qtqs
+
+      at Lobby.log [as startCountdown] (lobby.js:63:13)
+
+  console.log
+    [LOBBY] countdown expired for lobby lobby_r6t9qtqs, starting match
+
+      at Timeout.log [as _onTimeout] (lobby.js:65:15)
+
+  console.log
+    [LOBBY] startMatch invoked for lobby lobby_r6t9qtqs with 2 players
+
+      at Lobby.log [as startMatch] (lobby.js:97:13)
+
+  console.log
+    disconnected: uid-match-0
+
+      at Socket.log (server.js:247:15)
+
+  console.log
+    disconnected: uid-match-1
+
+      at Socket.log (server.js:247:15)
+
+  console.log
+    [CORS] Request from: undefined
+
+      at log (server.js:59:17)
+
+  console.log
+    [CORS] Allowed: undefined
+
+      at log (server.js:62:19)
+
+  console.log
+    connected: uid-state-a firebaseUid= uid-state-a socketId= 4YBwKSz5Q7RUH22_AAAN
+
+      at Namespace.log (server.js:215:13)
+
+  console.log
+    [CORS] Request from: undefined
+
+      at log (server.js:59:17)
+
+  console.log
+    [CORS] Allowed: undefined
+
+      at log (server.js:62:19)
+
+  console.log
+    connected: uid-state-b firebaseUid= uid-state-b socketId= ra-EAPNZpDWLZurJAAAP
+
+      at Namespace.log (server.js:215:13)
+
+  console.log
+    [LOBBY] player uid-state-a joined lobby lobby_8us45qbk (1/2)
+
+      at Lobby.log [as addPlayer] (lobby.js:26:13)
+
+  console.log
+    [LOBBY] player uid-state-b joined lobby lobby_8us45qbk (2/2)
+
+      at Lobby.log [as addPlayer] (lobby.js:26:13)
+
+  console.log
+    [LOBBY] short countdown (3000ms) started for lobby lobby_8us45qbk
+
+      at Lobby.log [as startCountdown] (lobby.js:63:13)
+
+  console.log
+    [LOBBY] countdown expired for lobby lobby_8us45qbk, starting match
+
+      at Timeout.log [as _onTimeout] (lobby.js:65:15)
+
+  console.log
+    [LOBBY] startMatch invoked for lobby lobby_8us45qbk with 2 players
+
+      at Lobby.log [as startMatch] (lobby.js:97:13)
+
+  console.log
+    disconnected: uid-state-a
+
+      at Socket.log (server.js:247:15)
+
+  console.log
+    disconnected: uid-state-b
+
+      at Socket.log (server.js:247:15)
+
+  console.log
+    [CORS] Request from: undefined
+
+      at log (server.js:59:17)
+
+  console.log
+    [CORS] Allowed: undefined
+
+      at log (server.js:62:19)
+
+  console.log
+    connected: uid-input-a firebaseUid= uid-input-a socketId= Q79a2053yHgyFSzsAAAR
+
+      at Namespace.log (server.js:215:13)
+
+  console.log
+    [CORS] Request from: undefined
+
+      at log (server.js:59:17)
+
+  console.log
+    [CORS] Allowed: undefined
+
+      at log (server.js:62:19)
+
+  console.log
+    connected: uid-input-b firebaseUid= uid-input-b socketId= -ta71DCNZdTDGJocAAAT
+
+      at Namespace.log (server.js:215:13)
+
+  console.log
+    [LOBBY] player uid-input-a joined lobby lobby_a2n3qbhy (1/2)
+
+      at Lobby.log [as addPlayer] (lobby.js:26:13)
+
+  console.log
+    [LOBBY] player uid-input-b joined lobby lobby_a2n3qbhy (2/2)
+
+      at Lobby.log [as addPlayer] (lobby.js:26:13)
+
+  console.log
+    [LOBBY] short countdown (3000ms) started for lobby lobby_a2n3qbhy
+
+      at Lobby.log [as startCountdown] (lobby.js:63:13)
+
+  console.log
+    [LOBBY] countdown expired for lobby lobby_a2n3qbhy, starting match
+
+      at Timeout.log [as _onTimeout] (lobby.js:65:15)
+
+  console.log
+    [LOBBY] startMatch invoked for lobby lobby_a2n3qbhy with 2 players
+
+      at Lobby.log [as startMatch] (lobby.js:97:13)
+
+  console.log
+    disconnected: uid-input-a
+
+      at Socket.log (server.js:247:15)
+
+  console.log
+    disconnected: uid-input-b
+
+      at Socket.log (server.js:247:15)
+
+  console.log
+    [CORS] Request from: undefined
+
+      at log (server.js:59:17)
+
+  console.log
+    [CORS] Allowed: undefined
+
+      at log (server.js:62:19)
+
+  console.log
+    connected: uid-disco-a firebaseUid= uid-disco-a socketId= mWfvuua08sug8B7XAAAV
+
+      at Namespace.log (server.js:215:13)
+
+  console.log
+    [CORS] Request from: undefined
+
+      at log (server.js:59:17)
+
+  console.log
+    [CORS] Allowed: undefined
+
+      at log (server.js:62:19)
+
+  console.log
+    connected: uid-disco-b firebaseUid= uid-disco-b socketId= 5jkfHhI56O7TUj8YAAAX
+
+      at Namespace.log (server.js:215:13)
+
+  console.log
+    [LOBBY] player uid-disco-a joined lobby lobby_m9l3viog (1/2)
+
+      at Lobby.log [as addPlayer] (lobby.js:26:13)
+
+  console.log
+    [LOBBY] player uid-disco-b joined lobby lobby_m9l3viog (2/2)
+
+      at Lobby.log [as addPlayer] (lobby.js:26:13)
+
+  console.log
+    [LOBBY] short countdown (3000ms) started for lobby lobby_m9l3viog
+
+      at Lobby.log [as startCountdown] (lobby.js:63:13)
+
+  console.log
+    [LOBBY] countdown expired for lobby lobby_m9l3viog, starting match
+
+      at Timeout.log [as _onTimeout] (lobby.js:65:15)
+
+  console.log
+    [LOBBY] startMatch invoked for lobby lobby_m9l3viog with 2 players
+
+      at Lobby.log [as startMatch] (lobby.js:97:13)
+
+  console.log
+    disconnected: uid-disco-a
+
+      at Socket.log (server.js:247:15)
+
+  console.log
+    disconnected: uid-disco-b
+
+      at Socket.log (server.js:247:15)
+
+Test Suites: 1 passed, 1 total
+Tests:       6 passed, 6 total
+Snapshots:   0 total
+Time:        17.126 s, estimated 19 s
+Ran all test suites matching tests/multiplayer.integration.test.js.

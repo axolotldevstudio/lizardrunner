@@ -41,6 +41,50 @@ function ownedSetToObject(set) {
   return obj;
 }
 
+async function publishSinglePlayerLeaderboardEntry(score) {
+  if (!window.currentUser || !Number.isFinite(Number(score)) || Number(score) <= 0) {
+    return null;
+  }
+
+  const uid = window.currentUser.uid;
+  const nextScore = Number(score);
+
+  try {
+    const idToken = await window.fbGetIdToken();
+    const backendUrl = window.CONFIG?.BACKEND_URL || 'http://localhost:3001';
+    const res = await fetch(`${backendUrl}/score/singleplayer`, {
+      method: 'POST',
+      mode: 'cors',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        score: nextScore,
+        uid,
+        idToken,
+        username: window.currentUser.username,
+      })
+    });
+
+    const text = await res.text();
+    let data = {};
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch (err) {
+      console.warn('[FB] Single-player leaderboard publish returned invalid JSON', { status: res.status, text });
+    }
+
+    if (!res.ok) {
+      console.error('[FB] Failed to publish single-player leaderboard entry', { status: res.status, body: data });
+      return null;
+    }
+
+    console.log('[FB] Single-player leaderboard entry published', { uid, score: nextScore, response: data });
+    return data;
+  } catch (err) {
+    console.error('[FB] Failed to publish single-player leaderboard entry', err);
+    return null;
+  }
+}
+
 window.fbSaveUserData = async function(data = {}) {
   console.log('[FB] fbSaveUserData start', { uid: window.currentUser?.uid, data });
   if (!window.currentUser) return null;
@@ -184,6 +228,9 @@ window.fbSubmitScore = async function(score) {
   console.log('[FB] fbSubmitScore', { score });
   if (!window.currentUser || score <= 0) return null;
 
+  const previousBest = Number(window.currentUser?.bestScore || 0);
+  const scoreValue = Number(score);
+
   try {
     // Fresh ID token proves this is a real logged-in user
     const idToken = await auth.currentUser.getIdToken(true);
@@ -215,16 +262,31 @@ window.fbSubmitScore = async function(score) {
       return null;
     }
 
-    console.log('[FB] Score submit success', { uid: window.currentUser.uid, newScales: data.newScales, newBest: data.newBest, earnedScales: data.earnedScales });
+    const newBest = Number(data.newBest || 0);
+    const isNewBest = newBest > previousBest && scoreValue >= newBest;
+    console.log('[FB] Score submit success', {
+      uid: window.currentUser.uid,
+      newScales: data.newScales,
+      newBest,
+      earnedScales: data.earnedScales,
+      previousBest,
+      isNewBest
+    });
 
     // Update local state from server response
     window.LR.scales = data.newScales;
-    window.LR.best   = data.newBest;
+    window.LR.best   = newBest;
     localStorage.setItem('lizardrun_scales', String(data.newScales));
-    localStorage.setItem('lizardrun_best',   String(data.newBest));
+    localStorage.setItem('lizardrun_best',   String(newBest));
     document.querySelectorAll('#start-scales, #store-scales').forEach(el => {
       el.textContent = data.newScales;
     });
+
+    if (isNewBest) {
+      await publishSinglePlayerLeaderboardEntry(scoreValue);
+    }
+
+    window.currentUser.bestScore = newBest;
 
     return data;
   } catch (e) {
@@ -235,51 +297,90 @@ window.fbSubmitScore = async function(score) {
 
 // ── Fetch leaderboard ─────────────────────────────────────────────
 window.fbFetchTopScores = async function(limit = 10) {
-  const q    = query(ref(db, 'leaderboard'), orderByChild('score'), limitToLast(limit));
-  const snap = await get(q);
-  if (!snap.exists()) return [];
-  // Prefer username stored with the score; fall back to sensible alternatives
-  return Object.values(snap.val())
-    .map(e => ({
-      username: e.username || e.displayName || (e.email ? e.email.split('@')[0] : null) || 'Player',
-      score: Number(e.score) || 0
-    }))
-    .sort((a, b) => b.score - a.score);
+  try {
+    const backendUrl = window.CONFIG?.BACKEND_URL || 'http://localhost:3001';
+    const res = await fetch(`${backendUrl}/leaderboard/singleplayer?limit=${limit}`, {
+      method: 'GET',
+      mode: 'cors',
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+
+    const rows = await res.json();
+    return Array.isArray(rows) ? rows.slice(0, limit) : [];
+  } catch (err) {
+    console.warn('[FB] Single-player leaderboard backend fetch failed, falling back to RTDB:', err);
+
+    try {
+      const q    = query(ref(db, 'leaderboard'), orderByChild('score'), limitToLast(limit));
+      const snap = await get(q);
+      if (!snap.exists()) return [];
+      return Object.values(snap.val())
+        .map(e => ({
+          username: e.username || e.displayName || (e.email ? e.email.split('@')[0] : null) || 'Player',
+          score: Number(e.score) || 0
+        }))
+        .sort((a, b) => b.score - a.score);
+    } catch (fallbackErr) {
+      console.error('[FB] Single-player leaderboard fallback failed:', fallbackErr);
+      return [];
+    }
+  }
 };
 
 window.fbFetchMultiplayerLeaderboard = async function(limit = 10) {
   try {
-    const q = query(ref(db, 'multiplayer/stats'), orderByChild('wins'), limitToLast(limit * 2));
-    const snap = await get(q);
-    if (!snap.exists()) return [];
-    
-    const players = [];
-    snap.forEach((childSnapshot) => {
-      const uid = childSnapshot.key;
-      const stats = childSnapshot.val();
-      players.push({
-        uid,
-        username: stats.username || `Player_${uid.slice(0, 6)}`,
-        wins: stats.wins || 0,
-        matches: stats.matches || 0,
-        top3Finishes: stats.top3Finishes || 0,
-        totalKills: stats.totalKills || 0,
-        bestPlacement: stats.bestPlacement || 999,
-        winRate: parseFloat(stats.winRate) || 0
-      });
+    const backendUrl = window.CONFIG?.BACKEND_URL || 'http://localhost:3001';
+    const res = await fetch(`${backendUrl}/leaderboard/multiplayer?limit=${limit}`, {
+      method: 'GET',
+      mode: 'cors',
+      headers: { 'Content-Type': 'application/json' }
     });
 
-    // Sort by ranking criteria: wins → top 3 finishes → kills → best placement
-    players.sort((a, b) => {
-      if (a.wins !== b.wins) return b.wins - a.wins;
-      if (a.top3Finishes !== b.top3Finishes) return b.top3Finishes - a.top3Finishes;
-      if (a.totalKills !== b.totalKills) return b.totalKills - a.totalKills;
-      return a.bestPlacement - b.bestPlacement;
-    });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
 
-    return players.slice(0, limit);
+    const rows = await res.json();
+    return Array.isArray(rows) ? rows.slice(0, limit) : [];
   } catch (err) {
-    console.error('[FB] Error fetching multiplayer leaderboard:', err);
-    return [];
+    console.error('[FB] Error fetching multiplayer leaderboard via backend:', err);
+
+    try {
+      const q = query(ref(db, 'multiplayer/stats'), orderByChild('wins'), limitToLast(limit * 2));
+      const snap = await get(q);
+      if (!snap.exists()) return [];
+
+      const players = [];
+      snap.forEach((childSnapshot) => {
+        const uid = childSnapshot.key;
+        const stats = childSnapshot.val();
+        players.push({
+          uid,
+          username: stats.username || `Player_${uid.slice(0, 6)}`,
+          wins: stats.wins || 0,
+          matches: stats.matches || 0,
+          top3Finishes: stats.top3Finishes || 0,
+          totalKills: stats.totalKills || 0,
+          bestPlacement: stats.bestPlacement || 999,
+          winRate: parseFloat(stats.winRate) || 0
+        });
+      });
+
+      players.sort((a, b) => {
+        if (a.wins !== b.wins) return b.wins - a.wins;
+        if (a.top3Finishes !== b.top3Finishes) return b.top3Finishes - a.top3Finishes;
+        if (a.totalKills !== b.totalKills) return b.totalKills - a.totalKills;
+        return a.bestPlacement - b.bestPlacement;
+      });
+
+      return players.slice(0, limit);
+    } catch (fallbackErr) {
+      console.error('[FB] Multiplayer leaderboard fallback failed:', fallbackErr);
+      return [];
+    }
   }
 };

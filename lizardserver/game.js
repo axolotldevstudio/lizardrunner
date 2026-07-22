@@ -42,6 +42,11 @@ class Match {
     this.obstacles = [];
     this.nextObstacleId = 1;
 
+    // ── Thermal zones (hot / cold) mirror the single-player gameplay loop ──
+    this.zones = [];
+    this.nextZoneId = 1;
+    this.zoneSpawnCooldown = 0;
+
     this.players.forEach((player) => {
       player.match = this;
       player.resetForMatch();
@@ -88,6 +93,18 @@ class Match {
     }));
   }
 
+  getPublicZones() {
+    return this.zones.map((z) => ({
+      id: z.id,
+      type: z.type,
+      x: z.x,
+      w: z.w,
+      yTop: z.yTop,
+      yBot: z.yBot,
+      heatRate: z.heatRate
+    }));
+  }
+
   sendStateToPlayer(player) {
     player.socket?.emit('state', {
       frame: this.frame,
@@ -95,7 +112,8 @@ class Match {
         acc[p.id] = p.getPublicState();
         return acc;
       }, {}),
-      obstacles: this.getPublicObstacles()
+      obstacles: this.getPublicObstacles(),
+      zones: this.getPublicZones()
     });
   }
 
@@ -141,6 +159,40 @@ class Match {
       targetId: target.id,
       fromId: attacker.id,
       lane: target.lane
+    });
+  }
+
+  // ── Thermal zones (hot / cold) ─────────────────────────────────────
+  maybeSpawnZone() {
+    if (this.zoneSpawnCooldown > 0) {
+      this.zoneSpawnCooldown -= 1;
+      return;
+    }
+
+    const laneA = Math.floor(Math.random() * LANE_COUNT);
+    const laneB = Math.min(laneA + Math.floor(Math.random() * 2) + 1, LANE_COUNT - 1);
+    const types = ['shade', 'shade', 'sun', 'dappled', 'deepshade'];
+    const type = types[Math.floor(Math.random() * types.length)];
+    const rates = { sun: 0.055, dappled: 0.018, shade: -0.022, deepshade: -0.04 };
+
+    this.zones.push({
+      id: this.nextZoneId++,
+      type,
+      x: 820,
+      w: Math.floor(Math.random() * 140) + 110,
+      yTop: laneA * 100,
+      yBot: (laneB + 1) * 100,
+      heatRate: rates[type]
+    });
+
+    this.zoneSpawnCooldown = Math.floor(Math.random() * 130) + 110;
+  }
+
+  updateZones() {
+    const moving = 2.2;
+    this.zones = this.zones.filter((zone) => {
+      zone.x -= moving;
+      return zone.x + zone.w > -20;
     });
   }
 
@@ -210,7 +262,17 @@ class Match {
       return;
     }
 
+    this.maybeSpawnZone();
+    this.updateZones();
     alivePlayers.forEach((player) => {
+      const activeZone = this.zones.find((z) => {
+        const zoneLaneMin = Math.floor(z.yTop / 100);
+        const zoneLaneMax = Math.floor((z.yBot - 1) / 100);
+        return player.lane >= zoneLaneMin && player.lane <= zoneLaneMax;
+      });
+      if (activeZone && activeZone.heatRate !== 0) {
+        player.temp += activeZone.heatRate;
+      }
       player.tick();
     });
 
@@ -258,7 +320,8 @@ class Match {
         acc[player.id] = player.getPublicState();
         return acc;
       }, {}),
-      obstacles: this.getPublicObstacles()
+      obstacles: this.getPublicObstacles(),
+      zones: this.getPublicZones()
     };
     this.broadcast('state', state);
   }
