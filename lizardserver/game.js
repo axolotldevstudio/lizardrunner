@@ -384,26 +384,31 @@ class Match {
         read: async (path) => {
           const { getRtdb } = require('./firebase');
           const rtdb = getRtdb();
-          if (!rtdb) return null;
+          if (!rtdb) {
+            throw new Error('Realtime Database not initialized for ranked ELO processing');
+          }
           const snap = await rtdb.ref(path).once('value');
           return snap.val();
         },
         write: async (path, value) => {
           const { getRtdb } = require('./firebase');
           const rtdb = getRtdb();
-          if (!rtdb) return;
+          if (!rtdb) {
+            throw new Error('Realtime Database not initialized for ranked ELO processing');
+          }
           await rtdb.ref(path).set(value);
         },
         transaction: async (path, updateFn) => {
           const { getRtdb } = require('./firebase');
           const rtdb = getRtdb();
-          if (!rtdb) throw new Error('RTDB unavailable for transaction');
+          if (!rtdb) {
+            throw new Error('Realtime Database not initialized for ranked ELO processing');
+          }
           return new Promise((resolve, reject) => {
             rtdb.ref(path).transaction((current) => {
               try {
                 return updateFn(current);
               } catch (e) {
-                // abort transaction
                 return;
               }
             }, (err, committed, snapshot) => {

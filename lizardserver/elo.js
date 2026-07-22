@@ -73,11 +73,8 @@ async function applyRankedMatchResult(store, matchId, players, winnerIds, option
       rank: getRankForElo(next.newRating),
       lastRankedResultAt: Date.now(),
     };
-    updates.push({ uid, profile: nextProfile, eloDelta: delta, actualScore });
+    updates.push({ uid, profile: nextProfile, eloDelta: delta, actualScore, eloBefore: currentElo, eloAfter: next.newRating });
   }
-
-  await store.write(markerRef, { matchId, completedAt: Date.now(), winnerIds: [...winnerSet] });
-  console.log(`[ELO] Wrote marker for match ${matchId}`);
 
   for (const update of updates) {
     const historyKey = `rankedHistory/${matchId}/${update.uid}`;
@@ -86,7 +83,7 @@ async function applyRankedMatchResult(store, matchId, players, winnerIds, option
       uid: update.uid,
       opponentUid: players.find((player) => (player.uid || player.firebaseUid || player.id) !== update.uid)?.uid || null,
       result: update.actualScore === 1 ? 'win' : (update.actualScore === 0.5 ? 'draw' : 'loss'),
-      eloBefore: Number((await store.read(`users/${update.uid}`))?.elo || 1000),
+      eloBefore: update.eloBefore,
       eloDelta: update.eloDelta,
       eloAfter: update.profile.elo,
       timestamp: Date.now(),
@@ -100,6 +97,9 @@ async function applyRankedMatchResult(store, matchId, players, winnerIds, option
       console.log(`[ELO] Wrote users/${update.uid} via write()`);
     }
   }
+
+  await store.write(markerRef, { matchId, completedAt: Date.now(), winnerIds: [...winnerSet] });
+  console.log(`[ELO] Wrote marker for match ${matchId}`);
 
   return {
     applied: true,

@@ -9,25 +9,104 @@ let rtdb = null;
 let initialized = false;
 let firebaseApp = null;
 
+function createTestRtdb() {
+  const state = {};
+
+  const resolvePath = (path) => {
+    const parts = String(path || '').split('/').filter(Boolean);
+    let cursor = state;
+    for (const part of parts) {
+      if (cursor == null || typeof cursor !== 'object' || !(part in cursor)) {
+        return undefined;
+      }
+      cursor = cursor[part];
+    }
+    return cursor;
+  };
+
+  const setPath = (path, value) => {
+    const parts = String(path || '').split('/').filter(Boolean);
+    let cursor = state;
+    for (let i = 0; i < parts.length - 1; i += 1) {
+      const part = parts[i];
+      if (!cursor[part] || typeof cursor[part] !== 'object') {
+        cursor[part] = {};
+      }
+      cursor = cursor[part];
+    }
+    if (parts.length === 0) {
+      Object.keys(state).forEach((key) => delete state[key]);
+      if (value && typeof value === 'object') {
+        Object.assign(state, value);
+      }
+    } else {
+      cursor[parts[parts.length - 1]] = value;
+    }
+  };
+
+  const createSnapshot = (value) => ({
+    val: () => (value === undefined ? null : value),
+    exists: () => value !== undefined && value !== null,
+  });
+
+  return {
+    ref(path) {
+      const normalizedPath = String(path || '');
+      return {
+        async once(eventType) {
+          if (eventType !== 'value') {
+            throw new Error(`Unsupported event type: ${eventType}`);
+          }
+          return createSnapshot(resolvePath(normalizedPath));
+        },
+        async set(value) {
+          setPath(normalizedPath, value);
+          return createSnapshot(value);
+        },
+        transaction(updateFn, callback) {
+          const current = resolvePath(normalizedPath);
+          let next;
+          try {
+            next = updateFn(current);
+          } catch (error) {
+            if (typeof callback === 'function') {
+              callback(error, false, createSnapshot(current));
+              return;
+            }
+            return Promise.reject(error);
+          }
+
+          const result = () => {
+            if (next !== undefined) {
+              setPath(normalizedPath, next);
+              return { committed: true, snapshot: createSnapshot(next) };
+            }
+            return { committed: false, snapshot: createSnapshot(current) };
+          };
+
+          if (typeof callback === 'function') {
+            const { committed, snapshot } = result();
+            callback(null, committed, snapshot);
+            return;
+          }
+
+          const { committed, snapshot } = result();
+          return Promise.resolve({ committed, snapshot });
+        }
+      };
+    }
+  };
+}
+
 function initFirebase() {
   if (initialized) return;
 
   if (process.env.NODE_ENV === 'test') {
-    try {
-      if (admin.apps.length === 0) {
-        admin.initializeApp({ projectId: 'test-project', databaseURL: 'https://test-project-default-rtdb.firebaseio.com' });
-      }
-    } catch (error) {
-      if (!error.message || !error.message.includes('already exists')) {
-        console.warn('Firebase initialization skipped in test mode:', error.message);
-      }
-    }
-
+    rtdb = createTestRtdb();
+    db = null;
     if (typeof admin.auth !== 'function') {
       admin.auth = () => ({ verifyIdToken: async () => ({ uid: 'test-user' }) });
     }
-    db = null;
-    rtdb = null;
     initialized = true;
     return;
   }

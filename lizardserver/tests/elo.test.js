@@ -104,4 +104,35 @@ describe('ranked ELO system', () => {
     expect(profileA.rankedGames).toBe(1);
     expect(profileA.elo).toBeGreaterThan(1000);
   });
+
+  it('updates winner and loser elo and writes a ranked marker', async () => {
+    const store = createFakeStore({
+      'uid-a': { elo: 1000, rankedWins: 0, rankedLosses: 0, rankedGames: 0 },
+      'uid-b': { elo: 1000, rankedWins: 0, rankedLosses: 0, rankedGames: 0 },
+    });
+
+    const result = await applyRankedMatchResult(store, 'match-elo-1', [
+      { uid: 'uid-a', id: 'a' },
+      { uid: 'uid-b', id: 'b' },
+    ], ['a']);
+
+    expect(result.applied).toBe(true);
+    expect(result.updates.length).toBe(2);
+
+    const winner = result.updates.find((entry) => entry.uid === 'uid-a');
+    const loser = result.updates.find((entry) => entry.uid === 'uid-b');
+
+    expect(winner.eloBefore).toBe(1000);
+    expect(winner.eloAfter).toBe(1016);
+    expect(winner.actualScore).toBe(1);
+    expect(loser.eloBefore).toBe(1000);
+    expect(loser.eloAfter).toBe(984);
+    expect(loser.actualScore).toBe(0);
+
+    const profileA = await store.read('users/uid-a');
+    const profileB = await store.read('users/uid-b');
+    expect(profileA).toMatchObject({ elo: 1016, rankedWins: 1, rankedGames: 1 });
+    expect(profileB).toMatchObject({ elo: 984, rankedLosses: 1, rankedGames: 1 });
+    expect(await store.read('rankedMatches/match-elo-1')).toMatchObject({ matchId: 'match-elo-1' });
+  });
 });
