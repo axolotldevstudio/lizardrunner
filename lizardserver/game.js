@@ -1,5 +1,6 @@
 const Player = require('./player');
 const { submitMatchResults } = require('./stats');
+const { applyRankedMatchResult } = require('./elo');
 const {
   TICK_MS,
   LANE_COUNT,
@@ -355,7 +356,7 @@ class Match {
     }
   }
 
-  endMatch(winnerIds) {
+  async endMatch(winnerIds) {
     if (this.interval) {
       clearInterval(this.interval);
       this.interval = null;
@@ -393,18 +394,41 @@ class Match {
           if (!rtdb) return;
           await rtdb.ref(path).set(value);
         },
+        transaction: async (path, updateFn) => {
+          const { getRtdb } = require('./firebase');
+          const rtdb = getRtdb();
+          if (!rtdb) throw new Error('RTDB unavailable for transaction');
+          return new Promise((resolve, reject) => {
+            rtdb.ref(path).transaction((current) => {
+              try {
+                return updateFn(current);
+              } catch (e) {
+                // abort transaction
+                return;
+              }
+            }, (err, committed, snapshot) => {
+              if (err) return reject(err);
+              resolve({ committed, val: snapshot && snapshot.val ? snapshot.val() : null });
+            });
+          });
+        },
       };
-      applyRankedMatchResult(store, this.id, rankedPlayers, winnerIds, { mode: 'ranked' }).then((result) => {
-        if (result.applied) {
+      console.log(`[GAME] Applying ranked ELO for match ${this.id} mode=${this.mode}`);
+      try {
+        const result = await applyRankedMatchResult(store, this.id, rankedPlayers, winnerIds, { mode: 'ranked' });
+        if (result && result.applied) {
+          console.log(`[GAME] Ranked ELO applied for match ${this.id}`, result.updates || []);
           this.broadcast('ranked_result', {
             matchId: this.id,
             mode: 'ranked',
             updates: result.updates,
           });
+        } else {
+          console.log(`[GAME] applyRankedMatchResult returned:`, result && result.reason ? result.reason : result);
         }
-      }).catch((err) => {
+      } catch (err) {
         console.error('[GAME] Failed to apply ranked ELO result:', err);
-      });
+      }
     }
 
     this.players.forEach((player) => {

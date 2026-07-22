@@ -29,14 +29,22 @@ function getRankForElo(elo) {
 
 async function applyRankedMatchResult(store, matchId, players, winnerIds, options = {}) {
   const mode = options.mode || 'ranked';
+  console.log(`[ELO] applyRankedMatchResult called for match ${matchId} mode=${mode}`);
   if (mode !== 'ranked') {
+    console.log(`[ELO] Match ${matchId} is casual — skipping ELO update`);
     return { applied: false, reason: 'casual' };
   }
 
   const markerRef = `rankedMatches/${matchId}`;
-  const existing = await store.read(markerRef);
-  if (existing) {
-    return { applied: false, reason: 'duplicate' };
+  try {
+    const existing = await store.read(markerRef);
+    if (existing) {
+      console.log(`[ELO] Match ${matchId} already processed (marker exists)`);
+      return { applied: false, reason: 'duplicate' };
+    }
+  } catch (e) {
+    console.error('[ELO] ERROR reading markerRef:', e && e.message ? e.message : e);
+    throw e;
   }
 
   const winnerSet = new Set(winnerIds || []);
@@ -47,10 +55,12 @@ async function applyRankedMatchResult(store, matchId, players, winnerIds, option
     if (!uid) continue;
     const profile = await store.read(`users/${uid}`);
     const currentElo = Number(profile?.elo ?? INITIAL_ELO);
+    console.log(`[ELO] Player ${player.id} -> uid=${uid} currentElo=${currentElo}`);
     const opponent = players.find((candidate) => candidate.id !== player.id && (candidate.uid || candidate.firebaseUid || candidate.id));
     const opponentUid = opponent?.uid || opponent?.firebaseUid || opponent?.id;
     const opponentProfile = opponentUid ? await store.read(`users/${opponentUid}`) : null;
     const opponentElo = Number(opponentProfile?.elo ?? INITIAL_ELO);
+    console.log(`[ELO] Opponent for ${uid}: uid=${opponentUid} elo=${opponentElo}`);
     const actualScore = winnerSet.has(player.id) ? 1 : (winnerSet.size === 0 ? 0.5 : 0);
     const next = calculateEloOutcome(currentElo, opponentElo, actualScore, options.kValue || ELO_K_VALUE);
     const delta = next.newRating - currentElo;
@@ -67,6 +77,7 @@ async function applyRankedMatchResult(store, matchId, players, winnerIds, option
   }
 
   await store.write(markerRef, { matchId, completedAt: Date.now(), winnerIds: [...winnerSet] });
+  console.log(`[ELO] Wrote marker for match ${matchId}`);
 
   for (const update of updates) {
     const historyKey = `rankedHistory/${matchId}/${update.uid}`;
@@ -82,9 +93,11 @@ async function applyRankedMatchResult(store, matchId, players, winnerIds, option
     });
     const writeFn = typeof store.transaction === 'function' ? store.transaction.bind(store) : null;
     if (writeFn) {
-      await writeFn(`users/${update.uid}`, (current) => ({ ...(current || {}), ...update.profile }));
+      const txnRes = await writeFn(`users/${update.uid}`, (current) => ({ ...(current || {}), ...update.profile }));
+      console.log(`[ELO] Transactioned users/${update.uid} -> committed=${txnRes && txnRes.committed}`);
     } else {
       await store.write(`users/${update.uid}`, update.profile);
+      console.log(`[ELO] Wrote users/${update.uid} via write()`);
     }
   }
 
