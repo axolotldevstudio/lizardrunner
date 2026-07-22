@@ -20,7 +20,14 @@ function createServerInstance(port = process.env.PORT || 3001) {
   )
     .split(',')
     .map(origin => origin.trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .map((origin) => {
+      try {
+        return new URL(origin).origin;
+      } catch (error) {
+        return `https://${origin}`;
+      }
+    });
 
   const isAllowedOrigin = (origin) => {
     if (!origin || origin === 'null') {
