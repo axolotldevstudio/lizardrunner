@@ -298,56 +298,33 @@ window.fbSubmitScore = async function(score) {
 // ── Fetch leaderboard ─────────────────────────────────────────────
 window.fbFetchTopScores = async function(limit = 10) {
   try {
-    const backendUrl = window.CONFIG?.BACKEND_URL || 'http://localhost:3001';
-    const res = await fetch(`${backendUrl}/leaderboard/singleplayer?limit=${limit}`, {
-      method: 'GET',
-      mode: 'cors',
-      headers: { 'Content-Type': 'application/json' }
-    });
-
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
-    }
-
-    const rows = await res.json();
-    return Array.isArray(rows) ? rows.slice(0, limit) : [];
-  } catch (err) {
-    console.warn('[FB] Single-player leaderboard backend fetch failed, falling back to RTDB:', err);
-
-    try {
-      const q    = query(ref(db, 'leaderboard'), orderByChild('score'), limitToLast(limit));
-      const snap = await get(q);
-      if (!snap.exists()) return [];
-      return Object.values(snap.val())
-        .map(e => ({
-          username: e.username || e.displayName || (e.email ? e.email.split('@')[0] : null) || 'Player',
-          score: Number(e.score) || 0
-        }))
-        .sort((a, b) => b.score - a.score);
-    } catch (fallbackErr) {
-      console.error('[FB] Single-player leaderboard fallback failed:', fallbackErr);
-      return [];
-    }
+    const q    = query(ref(db, 'leaderboard'), orderByChild('score'), limitToLast(limit));
+    const snap = await get(q);
+    if (!snap.exists()) return [];
+    return Object.values(snap.val())
+      .map(e => ({
+        username: e.username || e.displayName || (e.email ? e.email.split('@')[0] : null) || 'Player',
+        score: Number(e.score) || 0
+      }))
+      .sort((a, b) => b.score - a.score);
+  } catch (fallbackErr) {
+    console.error('[FB] Single-player leaderboard fetch failed:', fallbackErr);
+    return [];
   }
 };
 
 window.fbFetchMultiplayerLeaderboard = async function(limit = 10) {
-  try {
-    const backendUrl = window.CONFIG?.BACKEND_URL || 'http://localhost:3001';
-    const res = await fetch(`${backendUrl}/leaderboard/multiplayer?limit=${limit}`, {
-      method: 'GET',
-      mode: 'cors',
-      headers: { 'Content-Type': 'application/json' }
-    });
+  const backendUrl = window.CONFIG?.BACKEND_URL || 'http://localhost:3001';
+  const res = await fetch(`${backendUrl}/leaderboard/multiplayer?limit=${limit}`, {
+    method: 'GET',
+    mode: 'cors',
+    headers: { 'Content-Type': 'application/json' }
+  });
 
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
-    }
-
-    const rows = await res.json();
-    return Array.isArray(rows) ? rows.slice(0, limit) : [];
-  } catch (err) {
-    console.error('[FB] Error fetching multiplayer leaderboard via backend:', err);
-    return [];
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
   }
+
+  const rows = await res.json();
+  return Array.isArray(rows) ? rows.slice(0, limit) : [];
 };
