@@ -226,6 +226,9 @@ new p5(function(p) {
           tuatara.targetY = laneY(serverLane);
         }
         if (tuatara.y == null) tuatara.y = laneY(serverLane);
+        if (Math.abs((tuatara.predictedLane ?? tuatara.lane ?? 0) - serverLane) <= 1) {
+          tuatara.targetY = laneY(tuatara.predictedLane ?? tuatara.lane ?? serverLane);
+        }
         // Sync server-controlled states
         tuatara.inBurrow = !!me.inBurrow;
         tuatara.jumpTimer = Math.max(0, Number(me.jumpTimer || 0));
@@ -329,6 +332,7 @@ new p5(function(p) {
       sprinting: false,
       pushCooldown: 0,
       predictedLane: 1,
+      visualLane: 1,
       serverLane: 1,
       inputSeq: 0,
       lastInputAt: 0
@@ -498,8 +502,9 @@ new p5(function(p) {
     }
 
     if (multiplayerRunning) {
-      const desiredLane = tuatara.predictedLane ?? tuatara.serverLane ?? tuatara.lane ?? 1;
+      const desiredLane = tuatara.visualLane ?? tuatara.predictedLane ?? tuatara.serverLane ?? tuatara.lane ?? 1;
       const clampedLane = Math.max(0, Math.min(LANE_COUNT - 1, desiredLane));
+      tuatara.visualLane = clampedLane;
       tuatara.predictedLane = clampedLane;
       tuatara.lane = clampedLane;
       tuatara.targetY = laneY(clampedLane);
@@ -1095,11 +1100,12 @@ new p5(function(p) {
     const k = p.keyCode;
     console.log('[GAME] keyPressed', { key: p.key, keyCode: k });
     if (multiplayerRunning && window.multiplayer?.socket) {
-      const currentLane = Number.isFinite(tuatara?.predictedLane)
-        ? tuatara.predictedLane
-        : (Number.isFinite(tuatara?.serverLane) ? tuatara.serverLane : (tuatara?.lane ?? 1));
+      const currentLane = Number.isFinite(tuatara?.visualLane)
+        ? tuatara.visualLane
+        : (Number.isFinite(tuatara?.predictedLane) ? tuatara.predictedLane : (Number.isFinite(tuatara?.serverLane) ? tuatara.serverLane : (tuatara?.lane ?? 1)));
       if (k === 38) {
         const targetLane = Math.max(0, currentLane - 1);
+        tuatara.visualLane = targetLane;
         tuatara.predictedLane = targetLane;
         tuatara.lane = targetLane;
         tuatara.targetY = laneY(targetLane);
@@ -1109,6 +1115,7 @@ new p5(function(p) {
       }
       if (k === 40) {
         const targetLane = Math.min(LANE_COUNT - 1, currentLane + 1);
+        tuatara.visualLane = targetLane;
         tuatara.predictedLane = targetLane;
         tuatara.lane = targetLane;
         tuatara.targetY = laneY(targetLane);
