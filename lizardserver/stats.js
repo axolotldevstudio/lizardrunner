@@ -1,6 +1,7 @@
 // lizardserver/stats.js - Server-authoritative multiplayer stats tracking
 
 const firebase = require('./firebase');
+const { getRankForElo } = require('./elo');
 
 /**
  * Submit match results to Firebase
@@ -158,33 +159,33 @@ async function fetchMultiplayerLeaderboard(limit = 10) {
   if (!rtdb) return [];
 
   try {
-    const snapshot = await rtdb.ref('multiplayer/stats').orderByChild('wins').limitToLast(limit * 2).once('value');
-    
+    const snapshot = await rtdb.ref('users').once('value');
     if (!snapshot.exists()) return [];
 
     const players = [];
     snapshot.forEach((childSnapshot) => {
       const uid = childSnapshot.key;
-      const stats = childSnapshot.val();
+      const profile = childSnapshot.val() || {};
+      const rankedGames = Number(profile.rankedGames || 0);
+      if (!rankedGames) return;
+
+      const elo = Number(profile.elo || 1000);
       players.push({
         uid,
-        username: stats.username || `Player_${uid.slice(0, 6)}`,
-        wins: stats.wins || 0,
-        matches: stats.matches || 0,
-        top3Finishes: stats.top3Finishes || 0,
-        totalKills: stats.totalKills || 0,
-        bestPlacement: stats.bestPlacement || 999,
-        winRate: stats.winRate || 0,
-        lastMatch: stats.lastMatch || 0
+        username: profile.username || `Player_${uid.slice(0, 6)}`,
+        elo,
+        rank: profile.rank || getRankForElo(elo),
+        rankedWins: Number(profile.rankedWins || 0),
+        rankedLosses: Number(profile.rankedLosses || 0),
+        rankedGames,
+        lastMatch: profile.lastRankedResultAt || 0
       });
     });
 
-    // Sort by ranking criteria: wins → top 3 finishes → kills → best placement
     players.sort((a, b) => {
-      if (a.wins !== b.wins) return b.wins - a.wins;
-      if (a.top3Finishes !== b.top3Finishes) return b.top3Finishes - a.top3Finishes;
-      if (a.totalKills !== b.totalKills) return b.totalKills - a.totalKills;
-      return a.bestPlacement - b.bestPlacement;
+      if (a.elo !== b.elo) return b.elo - a.elo;
+      if (a.rankedGames !== b.rankedGames) return b.rankedGames - a.rankedGames;
+      return (b.lastMatch || 0) - (a.lastMatch || 0);
     });
 
     return players.slice(0, limit);

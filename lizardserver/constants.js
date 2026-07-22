@@ -33,6 +33,24 @@ const SPRINT_ENERGY_DRAIN = 1.2;
 const SPRINT_TEMP_RATE = 0.02;
 const PUSH_ENERGY_COST = 10;
 
+// ── Ranked ELO configuration ─────────────────────────────────────
+const INITIAL_ELO = 1000;
+const ELO_K_VALUE = Number(process.env.ELO_K_VALUE) || 32;
+const ELO_RANK_THRESHOLDS = [
+  { min: 1800, rank: 'Grandmaster' },
+  { min: 1600, rank: 'Master' },
+  { min: 1400, rank: 'Diamond' },
+  { min: 1200, rank: 'Platinum' },
+  { min: 1000, rank: 'Gold' },
+  { min: 800, rank: 'Silver' },
+  { min: 0, rank: 'Bronze' },
+];
+const RANKED_MATCHMAKING_MAX_DIFFS = [
+  { maxSeconds: 10, maxDiff: Number(process.env.ELO_MATCHMAKING_MAX_DIFF_0_10) || 100 },
+  { maxSeconds: 20, maxDiff: Number(process.env.ELO_MATCHMAKING_MAX_DIFF_10_20) || 200 },
+  { maxSeconds: 999999, maxDiff: Number(process.env.ELO_MATCHMAKING_MAX_DIFF_20_30) || 400 },
+];
+
 // ── Environment hazards (rats/stoats/cats) ──────────────────────────
 // Obstacles are modeled in ticks, not pixels, so they render consistently
 // across clients regardless of screen size.
@@ -72,6 +90,10 @@ module.exports = {
   SPRINT_ENERGY_DRAIN,
   SPRINT_TEMP_RATE,
   PUSH_ENERGY_COST,
+  INITIAL_ELO,
+  ELO_K_VALUE,
+  ELO_RANK_THRESHOLDS,
+  RANKED_MATCHMAKING_MAX_DIFFS,
   MAX_PREDATOR_DELAY,
   OBSTACLE_TRAVEL_TICKS,
   OBSTACLE_WARMUP_TICKS,

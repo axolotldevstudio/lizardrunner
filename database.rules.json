@@ -1,0 +1,42 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "users": {
+      "$uid": {
+        ".read": "auth != null && auth.uid == $uid",
+        ".write": "auth != null && auth.uid == $uid && !newData.hasChild('elo') && !newData.hasChild('rankedWins') && !newData.hasChild('rankedLosses') && !newData.hasChild('rankedGames')"
+      }
+    },
+    "usernames": {
+      "$username": {
+        ".read": true,
+        ".write": "auth != null"
+      }
+    },
+    "leaderboard": {
+      "$uid": {
+        ".read": true,
+        ".write": false
+      }
+    },
+    "rankedMatches": {
+      "$matchId": {
+        ".read": true,
+        ".write": false
+      }
+    },
+    "rankedHistory": {
+      "$matchId": {
+        "$uid": {
+          ".read": true,
+          ".write": false
+        }
+      }
+    },
+    "multiplayer": {
+      ".read": true,
+      ".write": false
+    }
+  }
+}

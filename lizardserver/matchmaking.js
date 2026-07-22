@@ -1,5 +1,5 @@
 const Lobby = require('./lobby');
-const { MAX_PLAYERS_PER_MATCH } = require('./constants');
+const { MAX_PLAYERS_PER_MATCH, RANKED_MATCHMAKING_MAX_DIFFS } = require('./constants');
 
 class Matchmaking {
   constructor(io, onLobbyReady) {
@@ -9,23 +9,27 @@ class Matchmaking {
     this.lobbies = new Map();
   }
 
-  getOpenLobby() {
-    if (!this.activeLobby || this.activeLobby.status === 'started') {
-      this.activeLobby = new Lobby(this.io, (lobby, players) => {
-        this.lobbies.delete(lobby.id);
-        if (this.activeLobby === lobby) {
+  getOpenLobby(mode = 'casual') {
+    const existingLobby = this.lobbies.values().next().value;
+    const preferredLobby = existingLobby && existingLobby.mode === mode ? existingLobby : null;
+    if (!preferredLobby || preferredLobby.status === 'started') {
+      const lobby = new Lobby(this.io, (readyLobby, players) => {
+        this.lobbies.delete(readyLobby.id);
+        if (this.activeLobby === readyLobby) {
           this.activeLobby = null;
         }
-        this.onLobbyReady(lobby, players);
-      });
-      this.lobbies.set(this.activeLobby.id, this.activeLobby);
+        this.onLobbyReady(readyLobby, players);
+      }, mode);
+      this.activeLobby = lobby;
+      this.lobbies.set(lobby.id, lobby);
+      return lobby;
     }
-    return this.activeLobby;
+    return preferredLobby;
   }
 
-  joinQueue(player) {
+  joinQueue(player, mode = 'casual') {
     if (player.lobby || player.match) return;
-    const lobby = this.getOpenLobby();
+    const lobby = this.getOpenLobby(mode);
     lobby.addPlayer(player);
   }
 

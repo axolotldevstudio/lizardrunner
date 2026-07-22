@@ -22,9 +22,10 @@ function clamp(value, min, max) {
 }
 
 class Match {
-  constructor(io, players, onFinished = () => {}) {
+  constructor(io, players, onFinished = () => {}, options = {}) {
     this.io = io;
     this.players = players;
+    this.mode = options.mode || 'casual';
     this.frame = 0;
     this.startedAt = Date.now();
     this.interval = null;
@@ -49,6 +50,7 @@ class Match {
 
     this.players.forEach((player) => {
       player.match = this;
+      player.matchMode = this.mode;
       player.resetForMatch();
     });
   }
@@ -358,15 +360,52 @@ class Match {
       clearInterval(this.interval);
       this.interval = null;
     }
-    this.broadcast('match_end', {
+    const resultPayload = {
       winnerIds,
-      players: this.players.map((player) => player.getPublicState())
-    });
+      players: this.players.map((player) => player.getPublicState()),
+      mode: this.mode,
+      matchId: this.id,
+    };
+    this.broadcast('match_end', resultPayload);
     
     // Submit results to Firebase (server-authoritative)
     submitMatchResults(this.id, this.players, winnerIds, this.startedAt).catch(err => {
       console.error('[GAME] Failed to submit match results:', err);
     });
+
+    if (this.mode === 'ranked') {
+      const rankedPlayers = this.players.map((player) => ({
+        id: player.id,
+        uid: player.firebaseUid,
+        firebaseUid: player.firebaseUid,
+      }));
+      const store = {
+        read: async (path) => {
+          const { getRtdb } = require('./firebase');
+          const rtdb = getRtdb();
+          if (!rtdb) return null;
+          const snap = await rtdb.ref(path).once('value');
+          return snap.val();
+        },
+        write: async (path, value) => {
+          const { getRtdb } = require('./firebase');
+          const rtdb = getRtdb();
+          if (!rtdb) return;
+          await rtdb.ref(path).set(value);
+        },
+      };
+      applyRankedMatchResult(store, this.id, rankedPlayers, winnerIds, { mode: 'ranked' }).then((result) => {
+        if (result.applied) {
+          this.broadcast('ranked_result', {
+            matchId: this.id,
+            mode: 'ranked',
+            updates: result.updates,
+          });
+        }
+      }).catch((err) => {
+        console.error('[GAME] Failed to apply ranked ELO result:', err);
+      });
+    }
 
     this.players.forEach((player) => {
       player.match = null;

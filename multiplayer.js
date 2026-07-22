@@ -5,6 +5,9 @@ const mpCancelBtn = document.getElementById('mp-cancel-btn');
 const mpBackBtn = document.getElementById('mp-back-btn');
 const mpServerInput = document.getElementById('mp-server');
 const mpLogList = document.getElementById('mp-log-list');
+const mpRankedBtn = document.getElementById('mp-ranked-btn');
+const mpCasualBtn = document.getElementById('mp-casual-btn');
+const mpRankedProfile = document.getElementById('mp-ranked-profile');
 
 // Fixed backend for Connect button (production)
 const FIXED_BACKEND_URL = 'https://lizardrunnerserver.onrender.com';
@@ -13,6 +16,7 @@ let socket = null;
 let connected = false;
 let matchId = null;
 let waiting = false;
+let selectedMode = 'casual';
 
 // Initialize server input to fixed backend URL
 if (mpServerInput) {
@@ -36,6 +40,12 @@ function setStatus(text, type = 'info') {
   mpStatus.dataset.state = type;
 }
 
+function setMode(mode) {
+  selectedMode = mode === 'ranked' ? 'ranked' : 'casual';
+  mpRankedBtn?.classList.toggle('active', selectedMode === 'ranked');
+  mpCasualBtn?.classList.toggle('active', selectedMode === 'casual');
+}
+
 function resetMultiplayerUi() {
   if (!window.CONFIG?.ENABLE_MULTIPLAYER) {
     setStatus('Multiplayer disabled', 'error');
@@ -45,6 +55,7 @@ function resetMultiplayerUi() {
     return;
   }
 
+  setMode(selectedMode);
   setStatus('Not connected');
   mpFindBtn.disabled = true;
   mpCancelBtn.disabled = true;
@@ -105,6 +116,14 @@ async function connectMultiplayer() {
     if (payload?.playerId) {
       window.multiplayer.playerId = payload.playerId;
     }
+    socket.emit('get_ranked_profile');
+  });
+
+  socket.on('ranked_profile', (payload) => {
+    if (!payload?.available) return;
+    if (mpRankedProfile) {
+      mpRankedProfile.textContent = `ELO: ${payload.elo || 1000} • Rank: ${payload.rank || 'Bronze'} • W/L: ${payload.rankedWins || 0}/${payload.rankedLosses || 0}`;
+    }
   });
 
   socket.on('lobby_update', (payload) => {
@@ -163,8 +182,28 @@ async function connectMultiplayer() {
     } else {
       logMultiplayer('Match ended.');
     }
+    if (result?.mode === 'ranked' && result?.matchId) {
+      const label = result.winnerIds?.includes(window.multiplayer?.playerId) ? 'Victory' : 'Defeat';
+      logMultiplayer(`${label} — ranked result stored by the server.`);
+    }
     if (window.onMultiplayerMatchEnd) {
       window.onMultiplayerMatchEnd(result);
+    }
+  });
+
+  // Server-side ranked ELO updates after match completion
+  socket.on('ranked_result', (payload) => {
+    if (!payload) return;
+    logMultiplayer('Received ranked result from server');
+    // Update ranked profile if included
+    if (payload.profile && payload.profile.uid === window.multiplayer?.playerId) {
+      mpRankedProfile.textContent = `ELO: ${payload.profile.elo || 1000} • Rank: ${payload.profile.rank || 'Bronze'} • W/L: ${payload.profile.rankedWins || 0}/${payload.profile.rankedLosses || 0}`;
+    }
+    if (window.onRankedResult) {
+      window.onRankedResult(payload);
+    } else {
+      // store for later consumers
+      window._lastRankedResult = payload;
     }
   });
 
@@ -182,7 +221,7 @@ function findMatch() {
     setStatus('Not connected', 'error');
     return;
   }
-  socket.emit('find_match');
+  socket.emit('find_match', { mode: selectedMode });
 }
 
 function cancelFind() {
@@ -214,6 +253,8 @@ mpConnectBtn.addEventListener('click', connectMultiplayer);
 mpFindBtn.addEventListener('click', findMatch);
 mpCancelBtn.addEventListener('click', cancelFind);
 mpBackBtn.addEventListener('click', hideMultiplayerScreen);
+mpRankedBtn?.addEventListener('click', () => setMode('ranked'));
+mpCasualBtn?.addEventListener('click', () => setMode('casual'));
 
 document.getElementById('multiplayer-btn')?.addEventListener('click', showMultiplayerScreen);
 

@@ -8,6 +8,7 @@ const Match = require('./game');
 const Matchmaking = require('./matchmaking');
 const { PLAYER_RECONNECT_MS, MAX_LOBBY_PLAYERS, LOBBY_COUNTDOWN_MS, MIN_PLAYERS_TO_START, MAX_PLAYERS_PER_MATCH } = require('./constants');
 const { fetchMultiplayerLeaderboard } = require('./stats');
+const { applyRankedMatchResult } = require('./elo');
 const os = require('os');
 
 function createServerInstance(port = process.env.PORT || 3001) {
@@ -208,7 +209,7 @@ function createServerInstance(port = process.env.PORT || 3001) {
   const matchmaking = new Matchmaking(io, (lobby, lobbyPlayers) => {
     const match = new Match(io, lobbyPlayers, (finishedMatch) => {
       matches.delete(finishedMatch.id);
-    });
+    }, { mode: lobby.mode || 'casual' });
     matches.set(match.id, match);
     lobbyPlayers.forEach((player) => {
       player.match = match;
@@ -343,8 +344,10 @@ function createServerInstance(port = process.env.PORT || 3001) {
     socket.emit('connected', { playerId: player.id, firebaseUid: player.firebaseUid, socketId: player.socketId, username: player.displayName });
     socket.emit('lobby_update', getLobbyPayload(player));
 
-    socket.on('find_match', () => {
-      matchmaking.joinQueue(player);
+    socket.on('find_match', (payload = {}) => {
+      const mode = payload?.mode === 'ranked' ? 'ranked' : 'casual';
+      player.preferredMatchMode = mode;
+      matchmaking.joinQueue(player, mode);
       if (player.lobby) {
         socket.emit('lobby_update', getLobbyPayload(player));
         if (['waiting', 'starting'].includes(player.lobby.status)) {
@@ -359,6 +362,29 @@ function createServerInstance(port = process.env.PORT || 3001) {
 
     socket.on('cancel_find', () => {
       matchmaking.leaveQueue(player);
+    });
+
+    socket.on('get_ranked_profile', async () => {
+      try {
+        const rtdb = getRtdb();
+        if (!rtdb) {
+          socket.emit('ranked_profile', { available: false });
+          return;
+        }
+        const snap = await rtdb.ref(`users/${player.firebaseUid}`).once('value');
+        const profile = snap.val() || {};
+        socket.emit('ranked_profile', {
+          available: true,
+          elo: Number(profile.elo || 1000),
+          rank: profile.rank || 'Bronze',
+          rankedWins: Number(profile.rankedWins || 0),
+          rankedLosses: Number(profile.rankedLosses || 0),
+          rankedGames: Number(profile.rankedGames || 0),
+        });
+      } catch (err) {
+        console.warn('[SERVER] ranked profile fetch failed', err && err.message ? err.message : err);
+        socket.emit('ranked_profile', { available: false });
+      }
     });
 
     socket.on('input', (payload) => {

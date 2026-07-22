@@ -5,11 +5,12 @@ function makeLobbyId() {
 }
 
 class Lobby {
-  constructor(io, onReady) {
+  constructor(io, onReady, mode = 'casual') {
     this.io = io;
     this.id = makeLobbyId();
     this.players = [];
     this.status = 'waiting';
+    this.mode = mode;
     const countdownMs = process.env.NODE_ENV === 'test' ? 1000 : LOBBY_COUNTDOWN_MS;
     this.countdown = countdownMs;
     this.countdownStart = null;
@@ -23,6 +24,9 @@ class Lobby {
     this.players.push(player);
     player.lobby = this;
     this.broadcastUpdate();
+    if (this.mode === 'ranked' && this.players.length >= 2) {
+      this.evaluateRankedPairing();
+    }
     console.log(`[LOBBY] player ${player.id} joined lobby ${this.id} (${this.players.length}/${MAX_LOBBY_PLAYERS})`);
     this.evaluateStart();
   }
@@ -36,6 +40,17 @@ class Lobby {
       this.cancelCountdown();
     }
     this.broadcastUpdate();
+  }
+
+  evaluateRankedPairing() {
+    if (this.mode !== 'ranked') return;
+    const rankedPlayers = this.players.filter((player) => player.preferredMatchMode === 'ranked');
+    if (rankedPlayers.length < 2) return;
+    const eloValues = rankedPlayers.map((player) => Number(player.elo || 1000));
+    const spread = Math.max(...eloValues) - Math.min(...eloValues);
+    if (spread <= 400) {
+      this.startCountdown();
+    }
   }
 
   evaluateStart() {

@@ -81,7 +81,12 @@
         <button id="mp-back-btn">Back</button>
       </div>
       <div id="mp-extra">
+        <div id="mp-mode-picker">
+          <button id="mp-ranked-btn" type="button">Ranked</button>
+          <button id="mp-casual-btn" type="button">Casual</button>
+        </div>
         <div id="mp-player-count" aria-live="polite">Players: 0 / 10</div>
+        <div id="mp-ranked-profile" aria-live="polite">ELO: -- • Rank: --</div>
       </div>
       <div id="mp-log"><strong>Match log</strong><div id="mp-log-list"></div></div>
     </div>
@@ -162,6 +167,7 @@
       </div>
 
       <p id="go-lb-msg" class="hidden"></p>
+      <p id="go-ranked-result" class="hidden"></p>
 
       <div id="go-buttons">
         <button id="restart-btn">Play Again</button>

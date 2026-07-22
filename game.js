@@ -278,6 +278,33 @@ new p5(function(p) {
       setTimeout(() => { mpPredatorAlert = ''; }, 2200);
     };
 
+    // Receive server-ranked ELO payloads and display them on gameover
+    window.onRankedResult = (payload) => {
+      try {
+        window._lastRankedResult = payload;
+        const slot = document.getElementById('go-ranked-result');
+        if (!slot) return;
+        if (!payload || !payload.updates || !mpMyId) {
+          slot.classList.add('hidden');
+          return;
+        }
+        const update = (payload.updates || []).find(u => String(u.uid) === String(mpMyId) || String(u.uid) === String(window.multiplayer?.playerId));
+        if (!update) {
+          slot.classList.add('hidden');
+          return;
+        }
+        const delta = Number(update.eloDelta || 0);
+        const before = Number(update.eloBefore || 0);
+        const after = Number(update.eloAfter || (before + delta));
+        const sign = delta >= 0 ? '+' : '';
+        const rank = update.profile?.rank || update.rank || (after ? window.getRankForElo ? window.getRankForElo(after) : '' : '');
+        slot.textContent = `ELO: ${sign}${delta} (${before} → ${after}) ${rank ? '• ' + rank : ''}`;
+        slot.classList.remove('hidden');
+      } catch (e) {
+        console.error('Failed to render ranked result', e);
+      }
+    };
+
     // Pause UI wiring
     const pauseScreen = document.getElementById('pause-screen');
     const pauseResume = document.getElementById('pause-resume');
