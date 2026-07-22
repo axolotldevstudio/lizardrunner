@@ -220,10 +220,9 @@ new p5(function(p) {
         temp = Number((me.temp || TEMP_START).toFixed(1));
         const serverLane = Math.max(0, Math.min(LANE_COUNT - 1, Number(me.lane ?? tuatara.lane ?? 1)));
         tuatara.serverLane = serverLane;
-        if (tuatara.predictedLane == null) tuatara.predictedLane = serverLane;
-        if (tuatara.predictedLane !== serverLane) {
-          tuatara.targetY = laneY(serverLane);
-        } else if (tuatara.targetY == null || Math.abs(tuatara.y - laneY(serverLane)) < 2) {
+        if (tuatara.predictedLane == null) {
+          tuatara.predictedLane = serverLane;
+          tuatara.lane = serverLane;
           tuatara.targetY = laneY(serverLane);
         }
         if (tuatara.y == null) tuatara.y = laneY(serverLane);
@@ -499,7 +498,7 @@ new p5(function(p) {
     }
 
     if (multiplayerRunning) {
-      const desiredLane = tuatara.predictedLane ?? tuatara.serverLane ?? tuatara.lane;
+      const desiredLane = tuatara.predictedLane ?? tuatara.serverLane ?? tuatara.lane ?? 1;
       const clampedLane = Math.max(0, Math.min(LANE_COUNT - 1, desiredLane));
       tuatara.predictedLane = clampedLane;
       tuatara.lane = clampedLane;
@@ -1096,14 +1095,24 @@ new p5(function(p) {
     const k = p.keyCode;
     console.log('[GAME] keyPressed', { key: p.key, keyCode: k });
     if (multiplayerRunning && window.multiplayer?.socket) {
-      const currentLane = (mpMyId && mpPlayers[mpMyId] && Number.isInteger(mpPlayers[mpMyId].lane)) ? mpPlayers[mpMyId].lane : (tuatara?.lane ?? 1);
+      const currentLane = Number.isFinite(tuatara?.predictedLane)
+        ? tuatara.predictedLane
+        : (Number.isFinite(tuatara?.serverLane) ? tuatara.serverLane : (tuatara?.lane ?? 1));
       if (k === 38) {
-        const payload = { type: 'lane', lane: Math.max(0, currentLane - 1) };
+        const targetLane = Math.max(0, currentLane - 1);
+        tuatara.predictedLane = targetLane;
+        tuatara.lane = targetLane;
+        tuatara.targetY = laneY(targetLane);
+        const payload = { type: 'lane', lane: targetLane, seq: ++tuatara.inputSeq, ts: performance.now() };
         console.log('[GAME] emit input', payload);
         window.multiplayer.socket.emit('input', payload);
       }
       if (k === 40) {
-        const payload = { type: 'lane', lane: Math.min(LANE_COUNT - 1, currentLane + 1) };
+        const targetLane = Math.min(LANE_COUNT - 1, currentLane + 1);
+        tuatara.predictedLane = targetLane;
+        tuatara.lane = targetLane;
+        tuatara.targetY = laneY(targetLane);
+        const payload = { type: 'lane', lane: targetLane, seq: ++tuatara.inputSeq, ts: performance.now() };
         console.log('[GAME] emit input', payload);
         window.multiplayer.socket.emit('input', payload);
       }
