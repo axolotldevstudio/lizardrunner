@@ -38,32 +38,35 @@ function createServerInstance(port = process.env.PORT || 3001) {
       return true;
     }
 
-    // Exact match
-    if (allowedOrigins.includes(origin)) {
-      return true;
-    }
+    try {
+      const candidateUrl = new URL(origin);
+      const candidateHost = candidateUrl.hostname;
 
-    // Compare origins safely
-    return allowedOrigins.some((allowed) => {
-      try {
-        const allowedUrl = new URL(allowed);
-        const candidateUrl = new URL(origin);
-
-        const sameProtocol =
-          allowedUrl.protocol === candidateUrl.protocol;
-
-        const sameHost =
-          allowedUrl.hostname === candidateUrl.hostname;
-
-        const localHostMatch =
-          ['localhost', '127.0.0.1', '::1'].includes(allowedUrl.hostname) &&
-          ['localhost', '127.0.0.1', '::1'].includes(candidateUrl.hostname);
-
-        return sameProtocol && (sameHost || localHostMatch);
-      } catch (error) {
-        return false;
+      if (candidateHost.endsWith('.pages.dev') || candidateHost === 'pages.dev') {
+        return true;
       }
-    });
+
+      if (allowedOrigins.includes(origin)) {
+        return true;
+      }
+
+      return allowedOrigins.some((allowed) => {
+        try {
+          const allowedUrl = new URL(allowed);
+          const sameProtocol = allowedUrl.protocol === candidateUrl.protocol;
+          const sameHost = allowedUrl.hostname === candidateHost;
+          const localHostMatch =
+            ['localhost', '127.0.0.1', '::1'].includes(allowedUrl.hostname) &&
+            ['localhost', '127.0.0.1', '::1'].includes(candidateHost);
+
+          return sameProtocol && (sameHost || localHostMatch);
+        } catch (error) {
+          return false;
+        }
+      });
+    } catch (error) {
+      return false;
+    }
   };
 
   const io = new Server(httpServer, {

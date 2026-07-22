@@ -950,5 +950,5 @@ new p5(function(p) {
     if (k===32) keys[' ']         = false;
     if (p.key)  keys[p.key]       = false;
   };
-
+  
 }); // end p5 instance
