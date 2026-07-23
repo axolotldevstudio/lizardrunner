@@ -55,12 +55,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function refreshMultiplayer() {
     console.log('[LEADERBOARD] refreshing multiplayer');
-    listEl.innerHTML = '<li class="lb-loading">Loading multiplayer rankings...</li>';
+    listEl.innerHTML = '<li class="lb-loading">Loading top ranked players...</li>';
     try {
       const rows = await window.fbFetchMultiplayerLeaderboard(10);
       console.log('[LEADERBOARD] loaded multiplayer leaderboard', { count: rows.length });
       if (!rows.length) {
-        listEl.innerHTML = '<li class="lb-empty">No competitive matches yet</li>';
+        listEl.innerHTML = '<li class="lb-empty">No ranked players yet</li>';
         return;
       }
       listEl.innerHTML = '';
@@ -69,12 +69,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const li = document.createElement('li');
         li.className = 'lb-row lb-mp' + (i < 3 ? ' lb-top' : '');
         const isMe = window.currentUser && r.username === window.currentUser.username;
-        const winRate = Number(r.winRate) || 0;
+        const wins = Number(r.rankedWins || 0);
+        const games = Number(r.rankedGames || 0);
+        const winRate = games ? (wins / games) * 100 : 0;
         li.innerHTML = `
           <span class="lb-rank">${medals[i] || (i + 1)}</span>
           <span class="lb-name${isMe ? ' lb-me' : ''}">${r.username}</span>
-          <span class="lb-stat">${r.wins}W</span>
-          <span class="lb-stat">${r.matches}M</span>
+          <span class="lb-stat">${r.elo} ELO</span>
+          <span class="lb-stat">${r.rank || 'Bronze'}</span>
+          <span class="lb-stat">${wins}W</span>
+          <span class="lb-stat">${games}G</span>
           <span class="lb-stat">${winRate.toFixed(0)}%</span>
         `;
         listEl.appendChild(li);

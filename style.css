@@ -269,6 +269,35 @@ button:active { transform: scale(0.96); }
   cursor: not-allowed;
 }
 
+#mp-mode-picker {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+#mp-mode-picker button {
+  flex: 1 1 0;
+  padding: 10px 14px;
+  border: 1px solid var(--rock-light);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-muted);
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+#mp-mode-picker button:hover:not(.active) {
+  border-color: var(--sand);
+  color: var(--sand);
+}
+
+#mp-mode-picker button.active {
+  background: var(--sand);
+  color: var(--rock);
+  border-color: var(--sand);
+}
+
 #mp-log {
   background: rgba(255,255,255,0.04);
   border: 1px solid rgba(255,255,255,0.08);
