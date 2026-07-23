@@ -8,18 +8,22 @@ const CONFIG = (() => {
   // Production backend URL - update this when deploying to production
   const PRODUCTION_BACKEND_URL = 'https://lizardrunnerserver.onrender.com';
 
+  // If `serverConfig.js` is present it exposes `window.SERVER_CONFIG`.
+  // Prefer `SERVER_CONFIG.global` as the canonical production backend when present.
+  const PREFERRED_GLOBAL_BACKEND = (window.SERVER_CONFIG && window.SERVER_CONFIG.global) ? window.SERVER_CONFIG.global : PRODUCTION_BACKEND_URL;
+
   return {
     // Multiplayer backend Socket.IO server
-    BACKEND_URL: isLocalhost ? 'http://localhost:3001' : PRODUCTION_BACKEND_URL,
+    BACKEND_URL: isLocalhost ? 'http://localhost:3001' : PREFERRED_GLOBAL_BACKEND,
     // Optional region mapping for multiplayer (used by region buttons in the UI)
     BACKEND_REGIONS: isLocalhost ? {
       us: 'http://localhost:3001',
       eu: 'http://localhost:3001',
       apac: 'http://localhost:3001'
     } : {
-      us: PRODUCTION_BACKEND_URL,
-      eu: PRODUCTION_BACKEND_URL,
-      apac: PRODUCTION_BACKEND_URL
+      us: PREFERRED_GLOBAL_BACKEND,
+      eu: PREFERRED_GLOBAL_BACKEND,
+      apac: PREFERRED_GLOBAL_BACKEND
     },
     
     // Environment

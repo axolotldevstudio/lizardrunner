@@ -53,7 +53,24 @@
   async function checkServerHealth(region) {
     const info = state.servers[region];
     if (!info || !info.url) return { available: false };
-    const healthUrl = info.url.replace(/\/$/, '') + DEFAULT_HEALTH_PATH;
+    // Avoid mixed-content: if the page is served over HTTPS, prefer HTTPS health checks.
+    let baseUrl = info.url;
+    if (location && location.protocol === 'https:') {
+      if (baseUrl.startsWith('http://')) {
+        // try https variant first
+        baseUrl = baseUrl.replace(/^http:\/\//i, 'https://');
+      }
+    }
+    // If still an insecure http URL on an https page, skip to avoid browser blocking
+    if (location && location.protocol === 'https:' && baseUrl.startsWith('http://')) {
+      info.status = 'UNAVAILABLE';
+      info.latency = null;
+      info.lastChecked = Date.now();
+      info.lastFailure = Date.now();
+      return { available: false, error: new Error('insecure_protocol') };
+    }
+
+    const healthUrl = baseUrl.replace(/\/$/, '') + DEFAULT_HEALTH_PATH;
     const start = Date.now();
     try {
       const res = await timeoutFetch(healthUrl, { method: 'GET', mode: 'cors' }, HEALTH_TIMEOUT_MS);
@@ -113,7 +130,19 @@
       const info = state.servers[region];
       if (!info || !info.url) return reject(new Error('no-url'));
       try {
-        const socket = io(info.url, {
+        // If the page is https, prefer https endpoints to avoid mixed content blocks
+        let connectUrl = info.url;
+        if (location && location.protocol === 'https:') {
+          if (connectUrl.startsWith('http://')) {
+            connectUrl = connectUrl.replace(/^http:\/\//i, 'https://');
+          }
+        }
+
+        if (location && location.protocol === 'https:' && connectUrl.startsWith('http://')) {
+          return reject(new Error('insecure_protocol'));
+        }
+
+        const socket = io(connectUrl, {
           transports: ['polling'],
           auth: authPayload,
           reconnection: false // we handle reconnection/failover ourselves

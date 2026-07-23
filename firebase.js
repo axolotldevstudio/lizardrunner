@@ -333,8 +333,8 @@ window.fbFetchTopScores = async function(limit = 10) {
 };
 
 window.fbFetchMultiplayerLeaderboard = async function(limit = 10) {
-  const backendUrl = window.CONFIG?.BACKEND_URL || 'https://lizardrunnerserver.onrender.com';
-  const res = await fetch(`${backendUrl}/leaderboard/multiplayer?limit=${limit}`, {
+  const backendUrl = window.CONFIG?.BACKEND_URL || 'http://localhost:3001';
+  const res = await fetch(`${backendUrl.replace(/\/$/, '')}/leaderboard/multiplayer?limit=${limit}`, {
     method: 'GET',
     mode: 'cors',
     headers: { 'Content-Type': 'application/json' }
