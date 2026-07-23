@@ -10,7 +10,7 @@ const mpCasualBtn = document.getElementById('mp-casual-btn');
 const mpRankedProfile = document.getElementById('mp-ranked-profile');
 
 // Fixed backend for Connect button (production). Overridden to localhost for local testing.
-const FIXED_BACKEND_URL = 'http://localhost:3001';
+const FIXED_BACKEND_URL = 'https://lizardrunnerserver.onrender.com';
 
 let socket = null;
 let connected = false;
