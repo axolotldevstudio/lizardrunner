@@ -342,8 +342,7 @@ window.fbFetchMultiplayerLeaderboard = async function(limit = 10) {
   const backendUrl = getBackendBaseUrl();
   const res = await fetch(`${backendUrl.replace(/\/$/, '')}/leaderboard/multiplayer?limit=${limit}`, {
     method: 'GET',
-    mode: 'cors',
-    headers: { 'Content-Type': 'application/json' }
+    mode: 'cors'
   });
 
   if (!res.ok) {
