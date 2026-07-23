@@ -497,15 +497,20 @@ function createServerInstance(port = process.env.PORT || 3001) {
 module.exports = createServerInstance;
 
 if (require.main === module) {
-  const PORT = process.env.PORT || 3001;
+  const PORT = Number(process.env.PORT || 3001);
+  const USE_HTTPS = process.env.USE_HTTPS === 'true';
 
   process.env.NODE_ENV = 'production';
+
+  if (USE_HTTPS && PORT !== 443) {
+    console.warn('[SERVER] USE_HTTPS=true with non-443 port is allowed, but some clients may treat it as non-standard HTTPS.');
+  }
 
   const server = createServerInstance(PORT);
 
   server.start()
     .then((port) => {
-      console.log(`🎮 Lizard Run PvP server running on port ${port}`);
+      console.log(`🎮 Lizard Run PvP server running on port ${port} ${USE_HTTPS ? '(HTTPS)' : '(HTTP)'}`);
     })
     .catch((err) => {
       console.error('Failed to start server:', err);

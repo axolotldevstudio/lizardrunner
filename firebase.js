@@ -32,6 +32,12 @@ const analytics = getAnalytics(app);
 const auth = getAuth(app);
 const db = getDatabase(app);
 
+function getBackendBaseUrl() {
+  const globalBackend = window.SERVER_CONFIG?.global || window.SERVER_CONFIG?.GLOBAL;
+  if (globalBackend) return globalBackend;
+  return window.CONFIG?.BACKEND_URL || 'http://localhost:3001';
+}
+
 function ownedObjectToSet(obj) {
   return new Set(Object.keys(obj || {}));
 }
@@ -60,8 +66,8 @@ async function publishSinglePlayerLeaderboardEntry(score) {
 
   try {
     const idToken = await window.fbGetIdToken();
-    const backendUrl = window.CONFIG?.BACKEND_URL || 'http://localhost:3001';
-    const res = await fetch(`${backendUrl}/score/singleplayer`, {
+    const backendUrl = getBackendBaseUrl();
+    const res = await fetch(`${backendUrl.replace(/\/$/, '')}/score/singleplayer`, {
       method: 'POST',
       mode: 'cors',
       headers: { 'Content-Type': 'application/json' },
@@ -333,7 +339,7 @@ window.fbFetchTopScores = async function(limit = 10) {
 };
 
 window.fbFetchMultiplayerLeaderboard = async function(limit = 10) {
-  const backendUrl = window.CONFIG?.BACKEND_URL || 'http://localhost:3001';
+  const backendUrl = getBackendBaseUrl();
   const res = await fetch(`${backendUrl.replace(/\/$/, '')}/leaderboard/multiplayer?limit=${limit}`, {
     method: 'GET',
     mode: 'cors',
