@@ -9,23 +9,22 @@ const mpRankedBtn = document.getElementById('mp-ranked-btn');
 const mpCasualBtn = document.getElementById('mp-casual-btn');
 const mpRankedProfile = document.getElementById('mp-ranked-profile');
 
-// Fixed backend for Connect button (production). Overridden to localhost for local testing.
-const FIXED_BACKEND_URL = 'https://lizardrunnerserver.onrender.com';
-
 let socket = null;
 let connected = false;
 let matchId = null;
 let waiting = false;
 let selectedMode = 'casual';
 
-// Initialize server input to fixed backend URL
+// If an input is present to override server selection, keep its value
 if (mpServerInput) {
-  mpServerInput.value = FIXED_BACKEND_URL;
-  mpServerInput.placeholder = FIXED_BACKEND_URL;
+  mpServerInput.placeholder = mpServerInput.placeholder || 'Leave blank to auto-select';
 }
 
 function getSelectedServerUrl() {
-  return FIXED_BACKEND_URL;
+  // If user entered a server URL manually, honor it
+  if (mpServerInput && mpServerInput.value && mpServerInput.value.trim()) return mpServerInput.value.trim();
+  // otherwise the serverManager will pick the best server
+  return null;
 }
 
 function logMultiplayer(message) {
@@ -66,58 +65,101 @@ async function connectMultiplayer() {
     setStatus('Multiplayer disabled', 'error');
     return;
   }
-  let serverUrl = getSelectedServerUrl();
-
-  if (!serverUrl) {
-    setStatus('No server URL configured', 'error');
-    return;
-  }
+  // If user provided a manual URL, use it; otherwise use serverManager to pick best
+  const manual = getSelectedServerUrl();
 
   if (socket) {
-    socket.disconnect();
+    try { socket.disconnect(); } catch (e) {}
     socket = null;
   }
 
-  setStatus('Connecting to ' + serverUrl + '...');
   const authPayload = {};
   if (window.fbGetIdToken) {
     const idToken = await window.fbGetIdToken();
     if (idToken) authPayload.idToken = idToken;
   }
- socket = io(serverUrl, {
-  transports: ['polling'],
-  auth: authPayload,
-  reconnection: true,
-  reconnectionDelay: 1000,
-  reconnectionDelayMax: 5000,
-  reconnectionAttempts: 5
-});
-  if (window.multiplayer) {
-    window.multiplayer.socket = socket;
+
+  let connectResult = null;
+  try {
+    if (manual) {
+      setStatus('Connecting to ' + manual + '...');
+      connectResult = await (async () => {
+        // basic manual connect
+        return new Promise((resolve, reject) => {
+          const s = io(manual, { transports: ['polling'], auth: authPayload, reconnection: false });
+          s.once('connect', () => resolve({ socket: s, region: 'manual' }));
+          s.once('connect_error', (err) => { try { s.disconnect(); } catch(e){}; reject(err); });
+          setTimeout(() => reject(new Error('connect_timeout')), 8000);
+        });
+      })();
+    } else if (window.serverManager && typeof window.serverManager.connectToBestServer === 'function') {
+      setStatus('Selecting best multiplayer server...');
+      const region = await window.serverManager.findBestServer();
+      if (!region) {
+        setStatus('No multiplayer servers available', 'error');
+        logMultiplayer('No available multiplayer servers');
+        return;
+      }
+      setStatus('Connecting to ' + region + ' server...');
+      connectResult = await window.serverManager.connectToServer(region, authPayload);
+    } else {
+      setStatus('Multiplayer config missing', 'error');
+      return;
+    }
+  } catch (err) {
+    setStatus(`Connect failed: ${err.message || err}`, 'error');
+    logMultiplayer('Connect failed: ' + String(err && err.message ? err.message : err));
+    return;
   }
 
-  socket.on('connect', () => {
-    connected = true;
-    setStatus(`Connected (${socket.id})`, 'success');
-    mpFindBtn.disabled = false;
-    mpCancelBtn.disabled = true;
-    logMultiplayer('Connected to server');
-  });
+  socket = connectResult.socket;
+  if (window.multiplayer) window.multiplayer.socket = socket;
 
-  socket.on('connect_error', (error) => {
-    connected = false;
-    setStatus(`Connect failed: ${error.message}`, 'error');
-    mpFindBtn.disabled = true;
-    mpCancelBtn.disabled = true;
-    logMultiplayer(`Connect error: ${error.message}`);
-  });
+  // common handler setup
+  function attachHandlers(s) {
+    s.on('connect', () => {
+      connected = true;
+      setStatus(`Connected (${s.id})`, 'success');
+      mpFindBtn.disabled = false;
+      mpCancelBtn.disabled = true;
+      logMultiplayer('Connected to server');
+    });
 
-  socket.on('connected', (payload) => {
-    if (payload?.playerId) {
-      window.multiplayer.playerId = payload.playerId;
-    }
-    socket.emit('get_ranked_profile');
-  });
+    s.on('connect_error', (error) => {
+      connected = false;
+      setStatus(`Connect failed: ${error.message}`, 'error');
+      mpFindBtn.disabled = true;
+      mpCancelBtn.disabled = true;
+      logMultiplayer(`Connect error: ${error.message}`);
+    });
+
+    s.on('connected', (payload) => {
+      if (payload?.playerId) {
+        window.multiplayer.playerId = payload.playerId;
+      }
+      s.emit('get_ranked_profile');
+    });
+
+    s.on('disconnect', async (reason) => {
+      connected = false;
+      logMultiplayer('Disconnected from server: ' + reason);
+      // attempt failover
+      try {
+        setStatus('Attempting failover...', 'info');
+        const res = await window.serverManager.attemptFailover(s, authPayload);
+        const newSocket = res.socket;
+        socket = newSocket;
+        if (window.multiplayer) window.multiplayer.socket = socket;
+        attachHandlers(socket);
+        setStatus('Reconnected to another server', 'success');
+      } catch (err) {
+        setStatus('Disconnected — no servers available', 'error');
+        resetMultiplayerUi();
+      }
+    });
+  }
+
+  attachHandlers(socket);
 
   socket.on('ranked_profile', (payload) => {
     if (!payload?.available) return;

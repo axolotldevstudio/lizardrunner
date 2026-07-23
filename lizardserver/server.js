@@ -105,6 +105,11 @@ function createServerInstance(port = process.env.PORT || 3001) {
     next();
   });
 
+  // Lightweight health endpoint for load/availability checks
+  app.get('/health', (req, res) => {
+    res.json({ status: 'ok', ts: Date.now() });
+  });
+
   initFirebase();
 
   // Log matchmaking config for easier debugging

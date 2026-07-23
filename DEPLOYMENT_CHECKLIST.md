@@ -214,7 +214,7 @@
 - [ ] Cloudflare cache hit rates
 - [ ] Response time percentiles
 
-### Data Quality
+### Data Quality 
 - [ ] Leaderboard accuracy spot-checked
 - [ ] Stats calculation audit
 - [ ] Data integrity checks
