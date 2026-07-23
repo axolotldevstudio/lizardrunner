@@ -42,6 +42,14 @@ function ownedSetToObject(set) {
   return obj;
 }
 
+function normalizePublicUsername(value) {
+  if (!value || typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (trimmed.includes('@')) return null;
+  return trimmed;
+}
+
 async function publishSinglePlayerLeaderboardEntry(score) {
   if (!window.currentUser || !Number.isFinite(Number(score)) || Number(score) <= 0) {
     return null;
@@ -127,7 +135,7 @@ onAuthStateChanged(auth, async (user) => {
     window.currentUser = {
       uid:       user.uid,
       email:     user.email,
-      username:  data.username || user.displayName || user.email?.split('@')[0] || 'Player',
+      username:  data.username || normalizePublicUsername(user.displayName) || 'Player',
       joinedAt:  data.joinedAt,
       bestScore: data.bestScore || 0,
     };
@@ -314,7 +322,7 @@ window.fbFetchTopScores = async function(limit = 10) {
     if (!snap.exists()) return [];
     return Object.values(snap.val())
       .map(e => ({
-        username: e.username || e.displayName || (e.email ? e.email.split('@')[0] : null) || 'Player',
+        username: e.username || 'Player',
         score: Number(e.score) || 0
       }))
       .sort((a, b) => b.score - a.score);

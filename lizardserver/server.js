@@ -11,6 +11,14 @@ const { fetchMultiplayerLeaderboard } = require('./stats');
 const { applyRankedMatchResult } = require('./elo');
 const os = require('os');
 
+function normalizePublicUsername(value) {
+  if (!value || typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (trimmed.includes('@')) return null;
+  return trimmed;
+}
+
 function createServerInstance(port = process.env.PORT || 3001) {
   const app = express();
   app.use(express.json());
@@ -154,13 +162,13 @@ function createServerInstance(port = process.env.PORT || 3001) {
       firebaseUid = socket.id;
     }
 
-    // Resolve a display name for the player (RTDB username -> Firebase displayName -> fallback 'Player')
+    // Resolve a public username for the player from RTDB or a safe auth displayName fallback.
     let displayName = null;
     try {
       const rtdb = getRtdb();
       if (rtdb) {
         const snap = await rtdb.ref(`users/${firebaseUid}/username`).once('value');
-        displayName = snap.val() || null;
+        displayName = normalizePublicUsername(snap.val()) || null;
       }
     } catch (err) {
       console.warn('Failed to fetch username from RTDB:', err && err.message ? err.message : String(err));
@@ -169,7 +177,7 @@ function createServerInstance(port = process.env.PORT || 3001) {
     if (!displayName && adminClient && adminClient.auth) {
       try {
         const userRecord = await adminClient.auth().getUser(firebaseUid);
-        displayName = userRecord.displayName || null;
+        displayName = normalizePublicUsername(userRecord.displayName) || null;
       } catch (err) {
         // ignore
       }
@@ -265,7 +273,7 @@ function createServerInstance(port = process.env.PORT || 3001) {
 
       const rows = Object.values(snap.val())
         .map((entry) => ({
-          username: entry.username || entry.displayName || 'Player',
+          username: normalizePublicUsername(entry.username) || normalizePublicUsername(entry.displayName) || 'Player',
           score: Number(entry.score) || 0,
           uid: entry.uid || null,
           updatedAt: entry.updatedAt || null,
@@ -303,7 +311,7 @@ function createServerInstance(port = process.env.PORT || 3001) {
       }
 
       const userSnap = await rtdb.ref(`users/${verifiedUid}/username`).once('value');
-      const displayName = userSnap.val() || username || decoded.name || 'Player';
+      const usernameValue = normalizePublicUsername(userSnap.val()) || normalizePublicUsername(decoded.name) || 'Player';
       const leaderboardRef = rtdb.ref(`leaderboard/${verifiedUid}`);
       const existingSnap = await leaderboardRef.once('value');
       const existing = existingSnap.val() || {};
@@ -314,13 +322,13 @@ function createServerInstance(port = process.env.PORT || 3001) {
           updated: false,
           uid: verifiedUid,
           score: existingScore,
-          username: existing.username || displayName,
+          username: existing.username || usernameValue,
         });
       }
 
       await leaderboardRef.set({
         uid: verifiedUid,
-        username: displayName,
+        username: usernameValue,
         score: scoreValue,
         updatedAt: Date.now(),
       });
@@ -328,7 +336,7 @@ function createServerInstance(port = process.env.PORT || 3001) {
       res.json({
         updated: true,
         uid: verifiedUid,
-        username: displayName,
+        username: usernameValue,
         score: scoreValue,
       });
     } catch (err) {
