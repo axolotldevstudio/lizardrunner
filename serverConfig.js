@@ -8,8 +8,8 @@
 
 const SERVER_CONFIG = {
   singapore: "https://lizardrunner.onrender.com",
-  europe:    "https://anti-hook-won-picked.trycloudflare.com",
-  global:    "https://anti-hook-won-picked.trycloudflare.com"
+  europe:    "https://terrorists-rebates-genome-complicated.trycloudflare.com",
+  global:    "https://terrorists-rebates-genome-complicated.trycloudflare.com"
 };
 
 // Expose for client scripts
