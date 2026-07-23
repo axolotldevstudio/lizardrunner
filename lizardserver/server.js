@@ -1,6 +1,8 @@
 require('dotenv').config({ path: process.env.DOTENV_CONFIG_PATH || '.env' });
 const express = require('express');
+const fs = require('fs');
 const http = require('http');
+const https = require('https');
 const { Server } = require('socket.io');
 const { initFirebase, getAdmin, getRtdb, isFirebaseReady } = require('./firebase');
 const Player = require('./player');
@@ -22,7 +24,20 @@ function normalizePublicUsername(value) {
 function createServerInstance(port = process.env.PORT || 3001) {
   const app = express();
   app.use(express.json());
-  const httpServer = http.createServer(app);
+
+  const useHttps = process.env.USE_HTTPS === 'true' || port === 443;
+  const tlsKeyPath = process.env.TLS_KEY_PATH || '/etc/letsencrypt/live/ec2-54-144-242-242.compute-1.amazonaws.com/privkey.pem';
+  const tlsCertPath = process.env.TLS_CERT_PATH || '/etc/letsencrypt/live/ec2-54-144-242-242.compute-1.amazonaws.com/fullchain.pem';
+
+  let httpServer;
+  if (useHttps) {
+    console.log('[SERVER] Starting in HTTPS mode on port', port);
+    const key = fs.readFileSync(tlsKeyPath, 'utf8');
+    const cert = fs.readFileSync(tlsCertPath, 'utf8');
+    httpServer = https.createServer({ key, cert }, app);
+  } else {
+    httpServer = http.createServer(app);
+  }
   const allowedOrigins = (
     process.env.ALLOWED_ORIGINS ||
     'https://lizardrunnerdev.pages.dev,https://9d8354d9.lizardrunnerdev.pages.dev,http://127.0.0.1:3000,http://localhost:3000,http://localhost:5500'

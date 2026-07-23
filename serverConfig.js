@@ -8,6 +8,7 @@
 
 const SERVER_CONFIG = {
   singapore: "https://lizardrunner.onrender.com",
+  europe:    "https://ec2-54-144-242-242.compute-1.amazonaws.com:3001",
   global:    "https://ec2-54-144-242-242.compute-1.amazonaws.com:3001"
 };
 
