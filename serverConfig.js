@@ -9,7 +9,7 @@
 const SERVER_CONFIG = {
   singapore: "PUT_SINGAPORE_SERVER_URL_HERE",
   europe:    "PUT_EUROPE_SERVER_URL_HERE",
-  global:    "PUT_AWS_GLOBAL_SERVER_URL_HERE"
+  global:    "http://ec2-54-144-242-242.compute-1.amazonaws.com:3001"
 };
 
 // Expose for client scripts
