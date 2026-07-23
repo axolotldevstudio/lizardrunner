@@ -7,7 +7,8 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
-  onAuthStateChanged
+  onAuthStateChanged,
+  updateProfile
 } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-auth.js";
 import {
   getDatabase, ref, get, set, query, orderByChild, limitToLast, update
@@ -192,7 +193,12 @@ window.fbRegister = async function(email, password, username) {
   if (taken.exists()) throw new Error('Username already taken — pick another');
 
   const cred = await createUserWithEmailAndPassword(auth, email, password);
-  const uid  = cred.user.uid;
+  const user = cred.user;
+  const uid  = user.uid;
+
+  await updateProfile(user, {
+    displayName: clean,
+  });
 
   await set(ref(db, `users/${uid}`), {
     username:  clean,
@@ -201,7 +207,7 @@ window.fbRegister = async function(email, password, username) {
     bestScore: 0,
     scales:    0,
     owned:     { classic: true, none: true },
-   equipped:  { skin: 'classic', trail: 'none', hat: 'none', powerup: 'none' },
+   equipped:  { skin: 'classic', trail: 'none', hat: 'classic', powerup: 'none' },
     timezone:  Intl.DateTimeFormat().resolvedOptions().timeZone || 'unknown',
   });
   await set(ref(db, `usernames/${clean.toLowerCase()}`), uid);
