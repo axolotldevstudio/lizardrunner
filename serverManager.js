@@ -11,7 +11,8 @@
 */
 
 (function(){
-  if (!window.SERVER_CONFIG) window.SERVER_CONFIG = {};
+  const root = typeof window !== 'undefined' ? window : globalThis;
+  if (!root.SERVER_CONFIG) root.SERVER_CONFIG = {};
 
   const DEFAULT_HEALTH_PATH = '/health';
   const HEALTH_TIMEOUT_MS = 4000;
@@ -23,9 +24,9 @@
   };
 
   function initServers() {
-    Object.keys(window.SERVER_CONFIG).forEach(region => {
+    Object.keys(root.SERVER_CONFIG).forEach(region => {
       state.servers[region] = {
-        url: window.SERVER_CONFIG[region],
+        url: root.SERVER_CONFIG[region],
         status: 'CHECKING',
         latency: null,
         lastChecked: 0,
@@ -72,19 +73,27 @@
     }
 
     const healthUrl = baseUrl.replace(/\/$/, '') + DEFAULT_HEALTH_PATH;
+    const queueUrl = baseUrl.replace(/\/$/, '') + '/matchmaking/queue';
     const start = Date.now();
     try {
       const res = await timeoutFetch(healthUrl, { method: 'GET', mode: 'cors' }, HEALTH_TIMEOUT_MS);
       if (!res.ok) throw new Error('bad status ' + res.status);
       const json = await res.json().catch(() => ({}));
+      const queueRes = await timeoutFetch(queueUrl, { method: 'GET', mode: 'cors' }, HEALTH_TIMEOUT_MS).catch(() => null);
+      let queueInfo = null;
+      if (queueRes && queueRes.ok) {
+        queueInfo = await queueRes.json().catch(() => null);
+      }
       const latency = Date.now() - start;
       info.status = 'AVAILABLE';
       info.latency = latency;
+      info.queueInfo = queueInfo && queueInfo.queue ? queueInfo.queue : null;
       info.lastChecked = Date.now();
-      return { available: true, latency, info, json };
+      return { available: true, latency, info, json, queueInfo: info.queueInfo };
     } catch (err) {
       info.status = 'UNAVAILABLE';
       info.latency = null;
+      info.queueInfo = null;
       info.lastChecked = Date.now();
       info.lastFailure = Date.now();
       return { available: false, error: err };
@@ -102,7 +111,7 @@
     return Object.entries(state.servers).filter(([r, info]) => info && info.status === 'AVAILABLE' && info.url).map(([r]) => r);
   }
 
-  async function findBestServer() {
+  async function findBestServer(preferredUrl = null) {
     // If no servers initialized, init
     if (!Object.keys(state.servers).length) initServers();
 
@@ -116,17 +125,46 @@
       if (!info.lastChecked || (now - info.lastChecked > RECHECK_FAILED_MS) || info.status === 'CHECKING') {
         return { region: r, res: await checkServerHealth(r) };
       }
-      return { region: r, res: { available: info.status === 'AVAILABLE', latency: info.latency } };
+      return { region: r, res: { available: info.status === 'AVAILABLE', latency: info.latency, queueInfo: info.queueInfo } };
     });
 
     const results = await Promise.all(checks);
-    const available = results.filter(r => r.res && r.res.available).map(r => ({ region: r.region, latency: r.res.latency || Number.MAX_SAFE_INTEGER }));
+    const available = results.filter(r => r.res && r.res.available).map(r => ({
+      region: r.region,
+      latency: r.res.latency || Number.MAX_SAFE_INTEGER,
+      url: state.servers[r.region]?.url || null,
+      queueInfo: r.res.queueInfo || state.servers[r.region]?.queueInfo || null,
+    }));
     if (!available.length) return null;
-    available.sort((a,b) => a.latency - b.latency);
-    return available[0].region;
+    const ranked = rankServerCandidates(available, preferredUrl);
+    return ranked[0]?.region || null;
   }
 
-  function connectToServer(region, authPayload = {}) {
+  function rankServerCandidates(candidates = [], preferredUrl = null) {
+    const normalizedPreferred = preferredUrl ? preferredUrl.replace(/\/$/, '') : null;
+    return candidates
+      .filter((entry) => entry && entry.url)
+      .map((entry) => ({
+        ...entry,
+        preferred: Boolean(normalizedPreferred && entry.url.replace(/\/$/, '') === normalizedPreferred),
+        queueScore: Number(entry.queueInfo?.totalWaiting || 0),
+        hasWaiters: Number(entry.queueInfo?.totalWaiting || 0) > 0,
+      }))
+      .sort((a, b) => {
+        const aHasWaiters = a.hasWaiters;
+        const bHasWaiters = b.hasWaiters;
+        if (a.preferred && aHasWaiters && !(b.preferred && bHasWaiters)) return -1;
+        if (b.preferred && bHasWaiters && !(a.preferred && aHasWaiters)) return 1;
+        if (aHasWaiters !== bHasWaiters) return aHasWaiters ? -1 : 1;
+        if (a.preferred !== b.preferred) return a.preferred ? -1 : 1;
+        if (b.queueScore !== a.queueScore) return b.queueScore - a.queueScore;
+        const aLatency = Number.isFinite(a.latency) ? a.latency : Number.MAX_SAFE_INTEGER;
+        const bLatency = Number.isFinite(b.latency) ? b.latency : Number.MAX_SAFE_INTEGER;
+        return aLatency - bLatency;
+      });
+  }
+
+  async function connectToServer(region, authPayload = {}) {
     return new Promise((resolve, reject) => {
       const info = state.servers[region];
       if (!info || !info.url) return reject(new Error('no-url'));
@@ -144,14 +182,13 @@
         }
 
         const socket = io(connectUrl, {
-          transports: ['polling'],
-          auth: authPayload,
+          ...buildSocketOptions(authPayload),
           reconnection: false // we handle reconnection/failover ourselves
         });
 
         const onConnect = () => {
           socket.off('connect_error', onError);
-          resolve({ socket, region });
+          resolve({ socket, region, url: connectUrl });
         };
 
         const onError = (err) => {
@@ -182,8 +219,8 @@
     });
   }
 
-  async function connectToBestServer(authPayload = {}) {
-    const best = await findBestServer();
+  async function connectToBestServer(authPayload = {}, preferredUrl = null) {
+    const best = await findBestServer(preferredUrl);
     if (best) {
       return connectToServer(best, authPayload);
     }
@@ -243,7 +280,7 @@
   }
 
   // Expose manager
-  window.serverManager = window.serverManager || {
+  root.serverManager = root.serverManager || {
     initServers,
     checkServerHealth,
     checkAllServers,
@@ -251,8 +288,15 @@
     connectToServer,
     connectToBestServer,
     attemptFailover,
+    rankServerCandidates,
     state
   };
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+      rankServerCandidates,
+    };
+  }
 
   // initialize once
   initServers();

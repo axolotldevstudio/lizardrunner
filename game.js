@@ -38,6 +38,118 @@ let mpPingDebugEnabled = false;
 let mpStateQueue = [];
 let mpLastStateApplyAt = 0;
 let mpStateApplyIntervalMs = 50;
+let perfDebugEnabled = false;
+let perfDebugVisible = false;
+let perfOverlayEl = null;
+let perfFrameCount = 0;
+let perfLastFpsAt = 0;
+let perfFps = 60;
+let perfFrameTimeMs = 0;
+let perfLastFrameAt = 0;
+let perfIncomingMessages = 0;
+let perfIncomingBytes = 0;
+let perfOutgoingMessages = 0;
+let perfOutgoingBytes = 0;
+let perfIncomingRate = 0;
+let perfOutgoingRate = 0;
+let perfIncomingBytesRate = 0;
+let perfOutgoingBytesRate = 0;
+let perfLastStatsAt = 0;
+let perfOverlayLastRefreshAt = 0;
+let perfSnapshot = { players: 0, enemies: 0, objects: 0 };
+
+function approximatePayloadBytes(payload) {
+  try {
+    return new TextEncoder().encode(JSON.stringify(payload)).length;
+  } catch (e) {
+    return String(payload || '').length;
+  }
+}
+
+function recordIncomingSocketMessage(eventName, payload) {
+  perfIncomingMessages += 1;
+  perfIncomingBytes += approximatePayloadBytes(payload);
+}
+
+function recordOutgoingSocketMessage(eventName, payload) {
+  perfOutgoingMessages += 1;
+  perfOutgoingBytes += approximatePayloadBytes(payload);
+}
+
+function updatePerfDebugStats(deltaMs) {
+  perfFrameCount += 1;
+  perfFrameTimeMs = deltaMs;
+  const now = performance.now();
+  if (now - perfLastStatsAt >= 1000) {
+    const elapsed = Math.max(1, now - perfLastStatsAt);
+    perfIncomingRate = Math.round(perfIncomingMessages / (elapsed / 1000));
+    perfOutgoingRate = Math.round(perfOutgoingMessages / (elapsed / 1000));
+    perfIncomingBytesRate = Math.round(perfIncomingBytes / (elapsed / 1000));
+    perfOutgoingBytesRate = Math.round(perfOutgoingBytes / (elapsed / 1000));
+    perfIncomingMessages = 0;
+    perfIncomingBytes = 0;
+    perfOutgoingMessages = 0;
+    perfOutgoingBytes = 0;
+    perfLastStatsAt = now;
+  }
+
+  if (now - perfLastFpsAt >= 500) {
+    const elapsedFrames = Math.max(1, perfFrameCount);
+    perfFps = (elapsedFrames * 1000) / Math.max(1, now - perfLastFpsAt);
+    perfFrameCount = 0;
+    perfLastFpsAt = now;
+  }
+}
+
+function refreshPerfDebugOverlay() {
+  if (!perfOverlayEl) return;
+  const now = performance.now();
+  if (now - perfOverlayLastRefreshAt < 250) return;
+  perfOverlayLastRefreshAt = now;
+  const playerCount = perfSnapshot.players || Object.keys(mpPlayers || {}).length;
+  const renderedObjectCount = perfSnapshot.objects || 0;
+  const enemyCount = perfSnapshot.enemies || 0;
+  perfOverlayEl.innerHTML = [
+    `<div><strong>PERF</strong></div>`,
+    `<div>FPS: ${perfFps.toFixed(0)}</div>`,
+    `<div>Frame: ${perfFrameTimeMs.toFixed(2)} ms</div>`,
+    `<div>Ping: ${mpLatency || mpPingAverage || 0} ms</div>`,
+    `<div>In msg/s: ${perfIncomingRate}</div>`,
+    `<div>Out msg/s: ${perfOutgoingRate}</div>`,
+    `<div>In KB/s: ${(perfIncomingBytesRate / 1024).toFixed(1)}</div>`,
+    `<div>Out KB/s: ${(perfOutgoingBytesRate / 1024).toFixed(1)}</div>`,
+    `<div>Players: ${playerCount}</div>`,
+    `<div>Enemies: ${enemyCount}</div>`,
+    `<div>Objects: ${renderedObjectCount}</div>`,
+    `<div>Server tick: ${mpServerTickRate || '—'} Hz</div>`
+  ].join('');
+  perfOverlayEl.style.display = perfDebugVisible ? 'block' : 'none';
+}
+
+function togglePerfDebugOverlay() {
+  perfDebugVisible = !perfDebugVisible;
+  if (perfOverlayEl) {
+    perfOverlayEl.style.display = perfDebugVisible ? 'block' : 'none';
+  }
+}
+
+window.__lrAttachSocketPerfTracking = function(socket) {
+  if (!socket || socket.__lrPerfTracked) return;
+  socket.__lrPerfTracked = true;
+  const originalOn = socket.on.bind(socket);
+  const originalEmit = socket.emit.bind(socket);
+  socket.on = function(eventName, handler) {
+    const wrappedHandler = (...args) => {
+      recordIncomingSocketMessage(eventName, args[0]);
+      return handler(...args);
+    };
+    return originalOn(eventName, wrappedHandler);
+  };
+  socket.emit = function(eventName, ...args) {
+    recordOutgoingSocketMessage(eventName, args[0]);
+    return originalEmit(eventName, ...args);
+  };
+};
 
 new p5(function(p) {
 
@@ -100,6 +212,75 @@ new p5(function(p) {
     }
   }
 
+  function applyMultiplayerState(state) {
+    if (!multiplayerRunning || !state) return;
+    const now = performance.now();
+    const snapshotTime = state.frame ?? now;
+    const incomingPlayers = state.players || {};
+    mpPlayers = incomingPlayers;
+    mpObstacles = Array.isArray(state.obstacles) ? state.obstacles : [];
+
+    Object.entries(incomingPlayers).forEach(([id, pl]) => {
+      if (!pl) return;
+      const prev = mpPlayerStateHistory[id] || null;
+      const incomingLane = Number(pl.lane ?? prev?.serverLane ?? 1);
+      const next = {
+        lane: incomingLane,
+        serverLane: incomingLane,
+        y: prev?.y ?? laneY(incomingLane),
+        targetLane: incomingLane,
+        receivedAt: now,
+        frame: snapshotTime,
+        alive: pl.alive !== false,
+        username: pl.username || id
+      };
+      if (prev) {
+        next.y = prev.y;
+        next.targetLane = incomingLane;
+      }
+      mpPlayerStateHistory[id] = next;
+    });
+
+    const ids = Object.keys(mpPlayerStateHistory || {}).filter((id) => !(id in incomingPlayers));
+    ids.forEach((id) => {
+      delete mpPlayerStateHistory[id];
+    });
+
+    if (mpMyId && mpPlayers[mpMyId] && tuatara) {
+      const me = mpPlayers[mpMyId];
+      score = Math.floor(me.score || 0);
+      temp = Number((me.temp || TEMP_START).toFixed(1));
+      const serverLane = Math.max(0, Math.min(LANE_COUNT - 1, Number(me.lane ?? tuatara.lane ?? 1)));
+      tuatara.serverLane = serverLane;
+      if (tuatara.predictedLane == null) {
+        tuatara.predictedLane = serverLane;
+        tuatara.lane = serverLane;
+        tuatara.targetY = laneY(serverLane);
+      }
+      if (tuatara.y == null) tuatara.y = laneY(serverLane);
+      if (Math.abs((tuatara.predictedLane ?? tuatara.lane ?? 0) - serverLane) <= 1) {
+        tuatara.targetY = laneY(tuatara.predictedLane ?? tuatara.lane ?? serverLane);
+      }
+      tuatara.inBurrow = !!me.inBurrow;
+      tuatara.jumpTimer = Math.max(0, Number(me.jumpTimer || 0));
+      tuatara.shieldHits = Number(me.shieldHits || 0);
+      tuatara.energy = Number((me.energy ?? ENERGY_START).toFixed(1));
+      tuatara.sprinting = !!me.sprinting;
+      tuatara.pushCooldown = Number(me.pushCooldown || 0);
+    }
+  }
+
+  function drainMultiplayerStateQueue() {
+    const now = performance.now();
+    if (!multiplayerRunning || mpStateQueue.length === 0) return;
+    const shouldApply = (now - mpLastStateApplyAt >= mpStateApplyIntervalMs) || mpStateQueue.length >= 2;
+    if (!shouldApply) return;
+    const latestState = mpStateQueue[mpStateQueue.length - 1];
+    mpStateQueue.length = 0;
+    mpLastStateApplyAt = now;
+    applyMultiplayerState(latestState);
+  }
+
   // ── Setup ────────────────────────────────────────────────────────
   p.setup = function() {
     const cnv = p.createCanvas(p.windowWidth, p.windowHeight);
@@ -109,6 +290,22 @@ new p5(function(p) {
     cnv.style('left', '0');
     cnv.style('z-index', '0');
     p.noSmooth();
+    p.frameRate(60);
+    perfDebugEnabled = window.CONFIG?.DEBUG === true || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    perfDebugVisible = perfDebugEnabled;
+    perfOverlayEl = document.getElementById('perf-debug-overlay');
+    if (!perfOverlayEl && perfDebugEnabled) {
+      perfOverlayEl = document.createElement('div');
+      perfOverlayEl.id = 'perf-debug-overlay';
+      perfOverlayEl.style.cssText = 'position:fixed;top:8px;right:8px;z-index:9999;background:rgba(6,12,18,0.85);color:#f4f4f4;padding:10px 12px;border:1px solid rgba(255,255,255,0.15);font:12px/1.4 monospace;border-radius:8px;pointer-events:none;max-width:220px;';
+      document.body.appendChild(perfOverlayEl);
+    }
+    if (perfOverlayEl) {
+      perfOverlayEl.style.display = perfDebugVisible ? 'block' : 'none';
+    }
+    perfLastStatsAt = performance.now();
+    perfLastFpsAt = performance.now();
+    perfLastFrameAt = performance.now();
     resize();
 
     startScreen    = document.getElementById('start-screen');
@@ -207,74 +404,11 @@ new p5(function(p) {
       }, 100);
     };
 
-    function applyMultiplayerState(state) {
-      if (!multiplayerRunning || !state) return;
-      const now = performance.now();
-      const snapshotTime = state.frame ?? now;
-      const incomingPlayers = state.players || {};
-      mpPlayers = incomingPlayers;
-      mpObstacles = Array.isArray(state.obstacles) ? state.obstacles : [];
-
-      Object.entries(incomingPlayers).forEach(([id, pl]) => {
-        if (!pl) return;
-        const prev = mpPlayerStateHistory[id] || null;
-        const incomingLane = Number(pl.lane ?? prev?.serverLane ?? 1);
-        const next = {
-          lane: incomingLane,
-          serverLane: incomingLane,
-          y: prev?.y ?? laneY(incomingLane),
-          targetLane: incomingLane,
-          receivedAt: now,
-          frame: snapshotTime,
-          alive: pl.alive !== false,
-          username: pl.username || id
-        };
-        if (prev) {
-          next.y = prev.y;
-          next.targetLane = incomingLane;
-        }
-        mpPlayerStateHistory[id] = next;
-      });
-
-      if (mpMyId && mpPlayers[mpMyId] && tuatara) {
-        const me = mpPlayers[mpMyId];
-        score = Math.floor(me.score || 0);
-        temp = Number((me.temp || TEMP_START).toFixed(1));
-        const serverLane = Math.max(0, Math.min(LANE_COUNT - 1, Number(me.lane ?? tuatara.lane ?? 1)));
-        tuatara.serverLane = serverLane;
-        if (tuatara.predictedLane == null) {
-          tuatara.predictedLane = serverLane;
-          tuatara.lane = serverLane;
-          tuatara.targetY = laneY(serverLane);
-        }
-        if (tuatara.y == null) tuatara.y = laneY(serverLane);
-        if (Math.abs((tuatara.predictedLane ?? tuatara.lane ?? 0) - serverLane) <= 1) {
-          tuatara.targetY = laneY(tuatara.predictedLane ?? tuatara.lane ?? serverLane);
-        }
-        tuatara.inBurrow = !!me.inBurrow;
-        tuatara.jumpTimer = Math.max(0, Number(me.jumpTimer || 0));
-        tuatara.shieldHits = Number(me.shieldHits || 0);
-        tuatara.energy = Number((me.energy ?? ENERGY_START).toFixed(1));
-        tuatara.sprinting = !!me.sprinting;
-        tuatara.pushCooldown = Number(me.pushCooldown || 0);
-      }
-    }
-
-    function drainMultiplayerStateQueue() {
-      const now = performance.now();
-      if (!multiplayerRunning || mpStateQueue.length === 0) return;
-      if (now - mpLastStateApplyAt < mpStateApplyIntervalMs && mpStateQueue.length < 2) return;
-      const latestState = mpStateQueue[mpStateQueue.length - 1];
-      mpStateQueue.length = 0;
-      mpLastStateApplyAt = now;
-      applyMultiplayerState(latestState);
-    }
-
     window.onMultiplayerState = (state) => {
-      if (!multiplayerRunning) return;
+      if (!multiplayerRunning || !state) return;
       mpStateQueue.push(state);
-      if (mpStateQueue.length > 3) {
-        mpStateQueue.splice(0, mpStateQueue.length - 3);
+      if (mpStateQueue.length > 2) {
+        mpStateQueue.splice(0, mpStateQueue.length - 2);
       }
     };
 
@@ -358,6 +492,11 @@ new p5(function(p) {
 
     // Toggle pause with Escape or P (single-player only)
     window.addEventListener('keydown', (ev) => {
+      if (ev.key === 'F3') {
+        ev.preventDefault();
+        togglePerfDebugOverlay();
+        return;
+      }
       if (ev.key === 'Escape' || ev.key === 'p' || ev.key === 'P') {
         if (multiplayerRunning) return; // don't allow pausing multiplayer
         paused = !paused;
@@ -432,6 +571,9 @@ new p5(function(p) {
     ids.forEach((id, idx) => {
       const pl = mpPlayers[id];
       if (!pl) return;
+      const layout = window.getMultiplayerOpponentLayout?.(idx, localX, scaleX) || { x: localX, side: 1, rank: 1, step: Math.round(55 * scaleX) };
+      const x = layout.x;
+      if (x < -80 * scaleX || x > W + 80 * scaleX) return;
       const state = mpPlayerStateHistory[id] || null;
       const serverLane = Math.max(0, Math.min(LANE_COUNT - 1, Number(pl.lane ?? state?.serverLane ?? 1)));
       const baseLane = Number(state?.lane ?? serverLane);
@@ -442,13 +584,6 @@ new p5(function(p) {
       const jumpTimer = pl.jumpTimer || 0;
       const jumpOffset = jumpTimer > 0 ? -Math.sin((jumpTimer / 20) * Math.PI) * 18 * sc : 0;
       const y = baseY + jumpOffset;
-
-      // Stagger opponents' x position so two players sharing a lane don't
-      // fully overlap and become indistinguishable.
-      const step = Math.round(55 * scaleX);
-      const side = idx % 2 === 0 ? 1 : -1;
-      const rank = Math.ceil((idx + 1) / 2);
-      const x = localX + side * step * rank;
 
       const alive = pl.alive !== false;
       const alpha = alive ? 220 : 90;
@@ -484,6 +619,7 @@ new p5(function(p) {
       const progress = Math.max(0, Math.min(1, o.progress ?? 0));
       const cy = laneY(lane) + Math.round(11 * sc); // vertical center of lane sprite
       const cx = p.lerp(W + 30 * scaleX, localX, Math.min(1, progress * 0.9 + 0.05));
+      if (cx < -80 * s || cx > W + 80 * s) continue;
       const bob = Math.sin(p.frameCount * 0.05 + lane * 0.35) * 0.8 * s;
 
       p.noStroke();
@@ -512,9 +648,20 @@ new p5(function(p) {
 
   // ── Draw ─────────────────────────────────────────────────────────
   p.draw = function() {
+    const now = performance.now();
+    const deltaMs = Math.max(1, now - (perfLastFrameAt || now));
+    perfLastFrameAt = now;
+    updatePerfDebugStats(deltaMs);
+
     if (!gameRunning) {
+      perfSnapshot = {
+        players: Object.keys(mpPlayers || {}).length,
+        enemies: mpObstacles?.length || 0,
+        objects: (obstacles?.length || 0) + (zones?.length || 0) + (particles?.length || 0) + (mpObstacles?.length || 0)
+      };
       drawBackground();
       drawGroundLanes();
+      refreshPerfDebugOverlay();
       return;
     }
 
@@ -534,11 +681,20 @@ new p5(function(p) {
       speed = (2.5 + framesSurvived / 2200) * scaleX;
 
       // In multiplayer the server is authoritative for deaths and many gameplay outcomes.
-      // Client still runs lightweight update/render for visuals to keep motion smooth.
+      // Keep the visual path lightweight so the client stays responsive.
       update();
-      render();
+      drawBackground();
+      drawGroundLanes();
+      perfSnapshot = {
+        players: Object.keys(mpPlayers || {}).length,
+        enemies: mpObstacles?.length || 0,
+        objects: (obstacles?.length || 0) + (zones?.length || 0) + (particles?.length || 0) + (mpObstacles?.length || 0)
+      };
       drawMultiplayerObstacles();
       drawMultiplayerPlayers();
+      drawMultiplayerHUD();
+      drawLizard();
+      refreshPerfDebugOverlay();
       return;
     }
 
@@ -550,9 +706,15 @@ new p5(function(p) {
 
     speed = (2.5 + framesSurvived / 2200) * scaleX;
 
+    perfSnapshot = {
+      players: Object.keys(mpPlayers || {}).length,
+      enemies: mpObstacles?.length || 0,
+      objects: (obstacles?.length || 0) + (zones?.length || 0) + (particles?.length || 0) + (mpObstacles?.length || 0)
+    };
     update();
     render();
     checkDeath();
+    refreshPerfDebugOverlay();
   };
 
   // ── Update ───────────────────────────────────────────────────────
@@ -673,25 +835,27 @@ new p5(function(p) {
     }
     temp = p.constrain(temp, TEMP_MIN, TEMP_MAX);
 
-    const trailItem = window.LR.equipped.trail;
-    const trailData = STORE_ITEMS.trails.find(t => t.id === trailItem);
-    if (trailData?.col && framesSurvived % 3 === 0 && !tuatara.inBurrow) {
-      particles.push({
-        x: tuatara.x + p.random(0, 10 * sc),
-        y: tuatara.y + tuatara.h / 2 + p.random(-4 * sc, 4 * sc),
-        vx: -p.random(0.5, 1.8) * scaleX,
-        vy: p.random(-0.5, 0.5),
-        life: 35, maxLife: 35,
-        col: trailData.col
-      });
-    }
+    if (!multiplayerRunning) {
+      const trailItem = window.LR.equipped.trail;
+      const trailData = STORE_ITEMS.trails.find(t => t.id === trailItem);
+      if (trailData?.col && framesSurvived % 3 === 0 && !tuatara.inBurrow) {
+        particles.push({
+          x: tuatara.x + p.random(0, 10 * sc),
+          y: tuatara.y + tuatara.h / 2 + p.random(-4 * sc, 4 * sc),
+          vx: -p.random(0.5, 1.8) * scaleX,
+          vy: p.random(-0.5, 0.5),
+          life: 35, maxLife: 35,
+          col: trailData.col
+        });
+      }
 
-    for (let pt of particles) {
-      pt.x += pt.vx * 0.9;
-      pt.y += pt.vy * 0.9;
-      pt.life--;
+      for (let pt of particles) {
+        pt.x += pt.vx * 0.9;
+        pt.y += pt.vy * 0.9;
+        pt.life--;
+      }
+      particles = particles.filter(pt => pt.life > 0);
     }
-    particles = particles.filter(pt => pt.life > 0);
 
     if (tuatara.shieldFlash > 0) tuatara.shieldFlash--;
 
@@ -902,6 +1066,26 @@ new p5(function(p) {
     const [br,bg,bb] = skin.body;
     const [vr,vg,vb] = skin.belly;
 
+    if (multiplayerRunning) {
+      p.noStroke();
+      p.fill(br,bg,bb);
+      p.ellipse(-3*s, 0, tw - 8*s, th - 4*s);
+      p.fill(vr,vg,vb);
+      p.ellipse(2*s, 2*s, tw - 16*s, th - 8*s);
+      p.fill(Math.min(255, br + 8), Math.min(255, bg + 8), Math.min(255, bb + 8));
+      p.ellipse(tw/2 - 4*s, -1*s, 16*s, 14*s);
+      p.fill(25,18,8); p.ellipse(tw/2 + 1*s, -2*s, 4*s, 4*s);
+      p.fill(255,240,80,200); p.ellipse(tw/2 + 2*s, -3*s, 2*s, 2*s);
+      p.fill(br,bg,bb);
+      p.beginShape();
+      p.vertex(-tw/2 + 2*s, 1*s);
+      p.vertex(-tw/2 - 10*s, -2*s);
+      p.vertex(-tw/2 - 4*s, 5*s);
+      p.endShape(p.CLOSE);
+      p.pop();
+      return;
+    }
+
     p.noStroke(); p.fill(0,0,0,35);
     p.ellipse(2*s, th/2+2*s, tw-4*s, 6*s);
 
@@ -978,6 +1162,44 @@ new p5(function(p) {
       p.noFill();
       p.stroke(255,240,100, 150+p.sin(p.frameCount*0.1)*80);
       p.strokeWeight(3*s); p.ellipse(hx,hy-12*s,22*s,8*s);
+    }
+  }
+
+  function drawMultiplayerHUD() {
+    p.noStroke();
+    p.fill(10,14,8,220);
+    p.rect(0, 0, W, LANE_TOP - 2);
+
+    const fs = scaleY;
+    const bx = Math.round(16*scaleX);
+    const by = Math.round(14*scaleY);
+    const bw = Math.round(220*scaleX);
+    const bh = Math.round(12*scaleY);
+
+    p.fill(28,28,18); p.rect(bx,by,bw,bh,4);
+    const fillW = p.map(temp, TEMP_MIN, TEMP_MAX, 0, bw);
+    let fillCol;
+    if (temp < TEMP_SAFE_LO) fillCol = p.color(75,125,235);
+    else if (temp <= TEMP_SAFE_HI) fillCol = p.color(75,215,95);
+    else fillCol = p.color(235, p.map(temp, TEMP_SAFE_HI, TEMP_MAX, 175, 55), 38);
+    p.fill(fillCol); p.rect(bx,by,fillW,bh,4);
+    p.noFill(); p.stroke(255,255,255,35); p.strokeWeight(1); p.rect(bx,by,bw,bh,4); p.noStroke();
+
+    p.fill(195,190,165); p.textSize(Math.max(8, Math.round(10*fs))); p.textAlign(p.LEFT);
+    p.text('TEMP', bx, by - Math.round(3*scaleY));
+    p.fill(fillCol); p.textSize(Math.max(8, Math.round(11*fs))); p.textAlign(p.RIGHT);
+    p.text(temp.toFixed(1)+'°C', bx+bw, by - Math.round(3*scaleY));
+
+    p.fill(195,190,165); p.textSize(Math.max(8, Math.round(9*fs))); p.textAlign(p.RIGHT);
+    p.text(`PING ${mpLatency || mpPingAverage || 0}ms`, W - Math.round(12*scaleX), Math.round(36*scaleY));
+    p.fill(95,215,110); p.textSize(Math.max(8, Math.round(9*fs))); p.textAlign(p.LEFT);
+    p.text(`MATCH ${mpMatchId ? mpMatchId.slice(0, 6) : 'LIVE'}`, bx, Math.round(36*scaleY));
+
+    if (mpPredatorAlert) {
+      p.fill(235,80,80,230);
+      p.textSize(Math.max(12, Math.round(13*fs)));
+      p.textAlign(p.CENTER);
+      p.text(mpPredatorAlert, W / 2, Math.round(28*scaleY));
     }
   }
 
@@ -1193,13 +1415,13 @@ new p5(function(p) {
         console.log('[GAME] emit input', payload);
         window.multiplayer.socket.emit('input', payload);
       }
-      if (k === 39) { const payload = { type: 'burst' }; console.log('[GAME] emit input', payload); window.multiplayer.socket.emit('input', payload); }
-      if (k === 32) { const payload = { type: 'burrow' }; console.log('[GAME] emit input', payload); window.multiplayer.socket.emit('input', payload); }
-      if (k === 16) { const payload = { type: 'sprint', active: true }; console.log('[GAME] emit input', payload); window.multiplayer.socket.emit('input', payload); }
-      if (k === 80) { const payload = { type: 'push' }; console.log('[GAME] emit input', payload); window.multiplayer.socket.emit('input', payload); }
-      if (k === 65) { const payload = { type: 'attack' }; console.log('[GAME] emit input', payload); window.multiplayer.socket.emit('input', payload); }
-      if (k === 70) { const payload = { type: 'flick_predator' }; console.log('[GAME] emit input', payload); window.multiplayer.socket.emit('input', payload); }
-      if (k === 74) { const payload = { type: 'jump' }; console.log('[GAME] emit input', payload); window.multiplayer.socket.emit('input', payload); }
+      if (k === 39) { const payload = { type: 'burst' }; if (window.CONFIG?.DEBUG) console.debug('[GAME] emit input', payload); window.multiplayer.socket.emit('input', payload); }
+      if (k === 32) { const payload = { type: 'burrow' }; if (window.CONFIG?.DEBUG) console.debug('[GAME] emit input', payload); window.multiplayer.socket.emit('input', payload); }
+      if (k === 16) { const payload = { type: 'sprint', active: true }; if (window.CONFIG?.DEBUG) console.debug('[GAME] emit input', payload); window.multiplayer.socket.emit('input', payload); }
+      if (k === 80) { const payload = { type: 'push' }; if (window.CONFIG?.DEBUG) console.debug('[GAME] emit input', payload); window.multiplayer.socket.emit('input', payload); }
+      if (k === 65) { const payload = { type: 'attack' }; if (window.CONFIG?.DEBUG) console.debug('[GAME] emit input', payload); window.multiplayer.socket.emit('input', payload); }
+      if (k === 70) { const payload = { type: 'flick_predator' }; if (window.CONFIG?.DEBUG) console.debug('[GAME] emit input', payload); window.multiplayer.socket.emit('input', payload); }
+      if (k === 74) { const payload = { type: 'jump' }; if (window.CONFIG?.DEBUG) console.debug('[GAME] emit input', payload); window.multiplayer.socket.emit('input', payload); }
       if ([32,38,40,39,65,70,74].includes(k)) return false;
       return;
     }

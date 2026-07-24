@@ -265,6 +265,14 @@ function createServerInstance(port = process.env.PORT || 3001) {
     res.json(health);
   });
 
+  app.get('/matchmaking/queue', (req, res) => {
+    res.json({
+      serverId: process.env.SERVER_ID || os.hostname(),
+      queue: matchmaking.getQueueSnapshot(),
+      timestamp: Date.now(),
+    });
+  });
+
   app.get('/leaderboard/multiplayer', async (req, res) => {
     try {
       const limit = Math.max(1, Math.min(Number(req.query.limit || 10), 20));
@@ -421,7 +429,9 @@ function createServerInstance(port = process.env.PORT || 3001) {
       // Prevent malformed input types
       if (typeof payload.type !== 'string') return;
       player.updateLastSeen();
-      console.log(`[INPUT] from ${player.id} (${player.firebaseUid}) payload=`, payload);
+      if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'development') {
+        console.log(`[INPUT] from ${player.id} (${player.firebaseUid}) payload=`, payload);
+      }
       if (player.match) {
         player.match.handleInput(player.firebaseUid, payload);
       }

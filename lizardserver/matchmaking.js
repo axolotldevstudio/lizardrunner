@@ -10,9 +10,9 @@ class Matchmaking {
   }
 
   getOpenLobby(mode = 'casual') {
-    const existingLobby = this.lobbies.values().next().value;
-    const preferredLobby = existingLobby && existingLobby.mode === mode ? existingLobby : null;
-    if (!preferredLobby || preferredLobby.status === 'started') {
+    const openLobbies = Array.from(this.lobbies.values()).filter((lobby) => lobby && lobby.mode === mode && lobby.status !== 'started');
+    const preferredLobby = openLobbies.find((lobby) => lobby.players.length < 2) || openLobbies[0] || null;
+    if (!preferredLobby) {
       const lobby = new Lobby(this.io, (readyLobby, players) => {
         this.lobbies.delete(readyLobby.id);
         if (this.activeLobby === readyLobby) {
@@ -31,6 +31,21 @@ class Matchmaking {
     if (player.lobby || player.match) return;
     const lobby = this.getOpenLobby(mode);
     lobby.addPlayer(player);
+  }
+
+  getQueueSnapshot() {
+    const lobbies = Array.from(this.lobbies.values()).filter(Boolean);
+    const byMode = lobbies.reduce((acc, lobby) => {
+      if (!acc[lobby.mode]) acc[lobby.mode] = 0;
+      acc[lobby.mode] += lobby.players.length;
+      return acc;
+    }, {});
+    return {
+      casual: byMode.casual || 0,
+      ranked: byMode.ranked || 0,
+      totalWaiting: lobbies.reduce((sum, lobby) => sum + lobby.players.length, 0),
+      lobbyCount: lobbies.length,
+    };
   }
 
   leaveQueue(player) {

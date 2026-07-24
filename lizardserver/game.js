@@ -116,7 +116,6 @@ class Match {
           id: p.id,
           lane: p.lane,
           alive: p.alive,
-          state: p.state,
           temp: Number(p.temp.toFixed(1)),
           score: Number(p.score.toFixed(1)),
           inBurrow: p.inBurrow,
@@ -129,16 +128,17 @@ class Match {
         };
         return acc;
       }, {}),
-      obstacles: this.getPublicObstacles().slice(-4)
+      obstacles: this.getPublicObstacles().slice(-2)
     });
   }
 
   handleInput(firebaseUid, input) {
     const player = this.players.find((p) => p.firebaseUid === firebaseUid || p.id === firebaseUid);
     if (!player || player.state !== 'alive') return;
-    // Log incoming input for debugging
-    // Keep logs minimal in production; verbose useful while diagnosing controls
-    console.log(`[MATCH:${this.id}] handleInput from ${player.id}:`, input);
+    // Keep input logging behind a debug flag to avoid expensive console churn in hot paths.
+    if (process.env.DEBUG === 'true' || process.env.NODE_ENV === 'development') {
+      console.log(`[MATCH:${this.id}] handleInput from ${player.id}:`, input);
+    }
     const action = player.applyInput(input);
     if (action === 'attack') {
       this.applyAttack(player);
@@ -357,7 +357,6 @@ class Match {
           id: player.id,
           lane: player.lane,
           alive: player.alive,
-          state: player.state,
           temp: Number(player.temp.toFixed(1)),
           score: Number(player.score.toFixed(1)),
           inBurrow: player.inBurrow,
@@ -370,7 +369,7 @@ class Match {
         };
         return acc;
       }, {}),
-      obstacles: this.getPublicObstacles().slice(-4)
+      obstacles: this.getPublicObstacles().slice(-2)
     };
     this.broadcast('state', state);
   }

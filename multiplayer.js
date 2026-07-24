@@ -84,6 +84,7 @@ async function connectMultiplayer() {
   }
 
   const authPayload = {};
+  const preferredServerUrl = window.multiplayer?.serverUrl || getSelectedServerUrl();
   if (window.fbGetIdToken) {
     const idToken = await window.fbGetIdToken();
     if (idToken) authPayload.idToken = idToken;
@@ -96,7 +97,7 @@ async function connectMultiplayer() {
       connectResult = await (async () => {
         // basic manual connect
         return new Promise((resolve, reject) => {
-          const s = io(manual, { transports: ['polling'], auth: authPayload, reconnection: false });
+          const s = io(manual, buildSocketOptions(authPayload));
           s.once('connect', () => resolve({ socket: s, region: 'manual' }));
           s.once('connect_error', (err) => { try { s.disconnect(); } catch(e){}; reject(err); });
           setTimeout(() => reject(new Error('connect_timeout')), 8000);
@@ -105,7 +106,7 @@ async function connectMultiplayer() {
     } else if (window.serverManager && typeof window.serverManager.connectToBestServer === 'function') {
       setStatus('Selecting best multiplayer server...');
       try {
-        connectResult = await window.serverManager.connectToBestServer(authPayload);
+        connectResult = await window.serverManager.connectToBestServer(authPayload, preferredServerUrl);
       } catch (err) {
         setStatus('No multiplayer servers available', 'error');
         logMultiplayer('No available multiplayer servers');
@@ -127,7 +128,13 @@ async function connectMultiplayer() {
   }
 
   socket = connectResult.socket;
-  if (window.multiplayer) window.multiplayer.socket = socket;
+  if (window.multiplayer) {
+    window.multiplayer.socket = socket;
+    window.multiplayer.serverUrl = connectResult.url || preferredServerUrl || null;
+  }
+  if (window.__lrAttachSocketPerfTracking) {
+    window.__lrAttachSocketPerfTracking(socket);
+  }
 
   // common handler setup
   function attachHandlers(s) {
