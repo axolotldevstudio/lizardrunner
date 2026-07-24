@@ -33,7 +33,7 @@ class Match {
     this.id = `match_${Math.random().toString(36).slice(2, 10)}`;
     this.state = 'waiting';
     this.tickRate = 1000 / TICK_MS;
-    this.broadcastFrequency = Math.max(1, Math.round(60 / TICK_MS));
+    this.broadcastFrequency = Math.max(2, Math.round(120 / TICK_MS));
     this.mapSeed = Math.floor(Math.random() * 1e9);
     this.onFinished = onFinished;
 

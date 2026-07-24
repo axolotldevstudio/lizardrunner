@@ -393,7 +393,8 @@ new p5(function(p) {
       const state = mpPlayerStateHistory[id] || null;
       const serverLane = Math.max(0, Math.min(LANE_COUNT - 1, Number(pl.lane ?? state?.serverLane ?? 1)));
       const baseLane = Number(state?.lane ?? serverLane);
-      const blend = Math.min(1, Math.max(0, (performance.now() - (state?.receivedAt || performance.now())) / 120));
+      const age = Math.max(0, Math.min(1, (performance.now() - (state?.receivedAt || performance.now())) / 80));
+      const blend = 1 - Math.pow(1 - age, 2);
       const lane = Math.max(0, Math.min(LANE_COUNT - 1, state ? baseLane + (serverLane - baseLane) * blend : serverLane));
       const baseY = laneY(lane);
       const jumpTimer = pl.jumpTimer || 0;
@@ -440,8 +441,8 @@ new p5(function(p) {
       const lane = Math.max(0, Math.min(LANE_COUNT - 1, o.lane ?? 0));
       const progress = Math.max(0, Math.min(1, o.progress ?? 0));
       const cy = laneY(lane) + Math.round(11 * sc); // vertical center of lane sprite
-      const cx = p.lerp(W + 30 * scaleX, localX, progress);
-      const bob = Math.sin(p.frameCount * 0.12) * 1.5 * s;
+      const cx = p.lerp(W + 30 * scaleX, localX, progress * 0.96 + 0.02);
+      const bob = Math.sin(p.frameCount * 0.08 + lane * 0.35) * 1.2 * s;
 
       p.noStroke();
       if (o.type === 'rat') {
@@ -490,7 +491,7 @@ new p5(function(p) {
       speed = (2.5 + framesSurvived / 2200) * scaleX;
 
       // In multiplayer the server is authoritative for deaths and many gameplay outcomes.
-      // Client still runs update/render for visuals, but do not apply client-side death.
+      // Client still runs lightweight update/render for visuals to keep motion smooth.
       update();
       render();
       drawMultiplayerObstacles();

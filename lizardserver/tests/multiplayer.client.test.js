@@ -83,8 +83,8 @@ function loadMultiplayerScript(socket) {
     querySelectorAll() {
       return [];
     }
-  };
-
+  };  
+ 
   const window = {
     document,
     CONFIG: { ENABLE_MULTIPLAYER: true },
