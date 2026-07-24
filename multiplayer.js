@@ -45,6 +45,16 @@ function setMode(mode) {
   mpCasualBtn?.classList.toggle('active', selectedMode === 'casual');
 }
 
+function syncConnectedUi(s) {
+  connected = Boolean(s?.connected);
+  mpFindBtn.disabled = !connected;
+  mpCancelBtn.disabled = !connected || !waiting;
+  if (connected) {
+    setStatus(`Connected (${s?.id || 'socket'})`, 'success');
+    logMultiplayer('Connected to server');
+  }
+}
+
 function resetMultiplayerUi() {
   if (!window.CONFIG?.ENABLE_MULTIPLAYER) {
     setStatus('Multiplayer disabled', 'error');
@@ -122,11 +132,7 @@ async function connectMultiplayer() {
   // common handler setup
   function attachHandlers(s) {
     s.on('connect', () => {
-      connected = true;
-      setStatus(`Connected (${s.id})`, 'success');
-      mpFindBtn.disabled = false;
-      mpCancelBtn.disabled = true;
-      logMultiplayer('Connected to server');
+      syncConnectedUi(s);
     });
 
     s.on('connect_error', (error) => {
@@ -164,6 +170,7 @@ async function connectMultiplayer() {
   }
 
   attachHandlers(socket);
+  syncConnectedUi(socket);
 
   socket.on('ranked_profile', (payload) => {
     if (!payload?.available) return;
@@ -263,7 +270,7 @@ async function connectMultiplayer() {
 }
 
 function findMatch() {
-  if (!socket || !connected) {
+  if (!socket || (!connected && !socket.connected)) {
     setStatus('Not connected', 'error');
     return;
   }
@@ -271,7 +278,7 @@ function findMatch() {
 }
 
 function cancelFind() {
-  if (!socket || !connected) return;
+  if (!socket || (!connected && !socket.connected)) return;
   socket.emit('cancel_find');
   waiting = false;
   mpFindBtn.disabled = false;
