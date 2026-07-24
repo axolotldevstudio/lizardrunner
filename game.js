@@ -5,8 +5,8 @@ const BASE_H = 400;
 
 const TEMP_MIN     = 8;
 const TEMP_MAX     = 32;
-const TEMP_SAFE_LO = 12;
-const TEMP_SAFE_HI = 20;
+const TEMP_SAFE_LO = 13;
+const TEMP_SAFE_HI = 19;
 const TEMP_START   = 15;
 const LANE_COUNT   = 4;
 const ENERGY_MAX   = 100;
@@ -35,9 +35,8 @@ let mpPingAverage = 0;
 let mpPingHighest = 0;
 let mpPingStatus = 'disconnected';
 let mpPingDebugEnabled = false;
-let mpStateQueue = [];
-let mpLastStateApplyAt = 0;
-let mpStateApplyIntervalMs = 50;
+let mpObstacleHistory = {};
+let mpObstacleKeySeq = 0;
 let perfDebugEnabled = false;
 let perfDebugVisible = false;
 let perfOverlayEl = null;
@@ -212,13 +211,78 @@ new p5(function(p) {
     }
   }
 
+  // The server only broadcasts state at mpServerTickRate (~20Hz) but we render
+  // at ~60fps. Rather than snapping obstacles straight to each raw snapshot
+  // (which freezes them for a couple of frames, then teleports them), we keep
+  // a small per-obstacle history and dead-reckon their position every frame
+  // based on the last known velocity. This mirrors the blend already used for
+  // opponent players below, just generalized since obstacles don't have a
+  // stable server-assigned id.
+  function assignObstacleDisplayKeys(newObstacles) {
+    const prevGroups = {};
+    (mpObstacles || []).forEach((o) => {
+      if (!o) return;
+      const gKey = `${o.lane}:${o.type}`;
+      (prevGroups[gKey] = prevGroups[gKey] || []).push(o);
+    });
+    Object.values(prevGroups).forEach(list =>
+      list.sort((a, b) => (a.progress ?? 0) - (b.progress ?? 0)));
+
+    const newGroups = {};
+    newObstacles.forEach((o) => {
+      if (!o) return;
+      const gKey = `${o.lane}:${o.type}`;
+      (newGroups[gKey] = newGroups[gKey] || []).push(o);
+    });
+
+    Object.entries(newGroups).forEach(([gKey, list]) => {
+      list.sort((a, b) => (a.progress ?? 0) - (b.progress ?? 0));
+      const prevList = prevGroups[gKey] || [];
+      list.forEach((o, idx) => {
+        const matched = prevList[idx];
+        o._dispKey = matched ? matched._dispKey : `obs_${mpObstacleKeySeq++}`;
+      });
+    });
+  }
+
+  function obstacleDisplayProgress(entry, now) {
+    if (!entry) return null;
+    const dt = entry.currAt - entry.prevAt;
+    const velocity = dt > 0 ? (entry.currProgress - entry.prevProgress) / dt : 0;
+    // Cap how far we'll extrapolate so a dropped/late packet doesn't send the
+    // obstacle flying past where the server actually has it.
+    const elapsed = Math.min(Math.max(0, now - entry.currAt), 200);
+    return Math.max(0, Math.min(1, entry.currProgress + velocity * elapsed));
+  }
+
   function applyMultiplayerState(state) {
     if (!multiplayerRunning || !state) return;
     const now = performance.now();
     const snapshotTime = state.frame ?? now;
     const incomingPlayers = state.players || {};
     mpPlayers = incomingPlayers;
-    mpObstacles = Array.isArray(state.obstacles) ? state.obstacles : [];
+    const incomingObstacles = Array.isArray(state.obstacles) ? state.obstacles : [];
+
+    assignObstacleDisplayKeys(incomingObstacles);
+    const seenObstacleKeys = new Set();
+    incomingObstacles.forEach((o) => {
+      if (!o) return;
+      const key = o._dispKey;
+      seenObstacleKeys.add(key);
+      const prevEntry = mpObstacleHistory[key];
+      const progress = Number(o.progress ?? 0);
+      mpObstacleHistory[key] = {
+        prevProgress: prevEntry ? prevEntry.currProgress : progress,
+        prevAt: prevEntry ? prevEntry.currAt : now,
+        currProgress: progress,
+        currAt: now,
+      };
+    });
+    Object.keys(mpObstacleHistory).forEach((key) => {
+      if (!seenObstacleKeys.has(key)) delete mpObstacleHistory[key];
+    });
+
+    mpObstacles = incomingObstacles;
 
     Object.entries(incomingPlayers).forEach(([id, pl]) => {
       if (!pl) return;
@@ -270,16 +334,6 @@ new p5(function(p) {
     }
   }
 
-  function drainMultiplayerStateQueue() {
-    const now = performance.now();
-    if (!multiplayerRunning || mpStateQueue.length === 0) return;
-    const shouldApply = (now - mpLastStateApplyAt >= mpStateApplyIntervalMs) || mpStateQueue.length >= 2;
-    if (!shouldApply) return;
-    const latestState = mpStateQueue[mpStateQueue.length - 1];
-    mpStateQueue.length = 0;
-    mpLastStateApplyAt = now;
-    applyMultiplayerState(latestState);
-  }
 
   // ── Setup ────────────────────────────────────────────────────────
   p.setup = function() {
@@ -386,14 +440,14 @@ new p5(function(p) {
       mpMyId = payload.myPlayerId || window.multiplayer?.playerId || window.multiplayer?.socket?.id || null;
       mpPlayers = {};
       mpObstacles = [];
+      mpObstacleHistory = {};
+      mpObstacleKeySeq = 0;
       mpServerTickRate = payload.tickRate || 20;
       mpPingStatus = 'connecting';
       mpLatency = 0;
       mpPingSamples = [];
       mpPingAverage = 0;
       mpPingHighest = 0;
-      mpStateQueue = [];
-      mpLastStateApplyAt = performance.now();
       refreshMultiplayerPingUi();
       multiplayerMode = true;
       multiplayerRunning = true;
@@ -406,10 +460,7 @@ new p5(function(p) {
 
     window.onMultiplayerState = (state) => {
       if (!multiplayerRunning || !state) return;
-      mpStateQueue.push(state);
-      if (mpStateQueue.length > 2) {
-        mpStateQueue.splice(0, mpStateQueue.length - 2);
-      }
+      applyMultiplayerState(state);
     };
 
     window.onMultiplayerMatchEnd = (result) => {
@@ -434,6 +485,8 @@ new p5(function(p) {
       mpMyId = null;
       mpPlayers = {};
       mpObstacles = [];
+      mpObstacleHistory = {};
+      mpObstacleKeySeq = 0;
       mpPredatorAlert = '';
       mpPingStatus = 'disconnected';
       mpLatency = 0;
@@ -614,9 +667,13 @@ new p5(function(p) {
     const localX = Math.round(100 * scaleX);
     const s = sc;
 
+    const now = performance.now();
     for (const o of mpObstacles) {
       const lane = Math.max(0, Math.min(LANE_COUNT - 1, o.lane ?? 0));
-      const progress = Math.max(0, Math.min(1, o.progress ?? 0));
+      const historyEntry = mpObstacleHistory[o._dispKey];
+      const progress = historyEntry
+        ? obstacleDisplayProgress(historyEntry, now)
+        : Math.max(0, Math.min(1, o.progress ?? 0));
       const cy = laneY(lane) + Math.round(11 * sc); // vertical center of lane sprite
       const cx = p.lerp(W + 30 * scaleX, localX, Math.min(1, progress * 0.9 + 0.05));
       if (cx < -80 * s || cx > W + 80 * s) continue;
@@ -673,7 +730,6 @@ new p5(function(p) {
     }
 
     if (multiplayerRunning) {
-      drainMultiplayerStateQueue();
       framesSurvived++;
       score = Math.floor(framesSurvived / 60 * 10);
       const hoarder = window.LR.equipped.powerup === 'hoarder';
@@ -704,7 +760,7 @@ new p5(function(p) {
     const hoarder = window.LR.equipped.powerup === 'hoarder';
     earnedThisRun = Math.floor(score / 10) * (hoarder ? 2 : 1);
 
-    speed = (2.5 + framesSurvived / 2200) * scaleX;
+    speed = (3.0 + framesSurvived / 1400) * scaleX;
 
     perfSnapshot = {
       players: Object.keys(mpPlayers || {}).length,
@@ -811,8 +867,8 @@ new p5(function(p) {
       if (!lastZ || lastZ.x + lastZ.w < W + 80) spawnZone(W + 60);
 
       const obsOnScreen = obstacles.filter(o => o.x > W - 20).length;
-      const spawnChance = p.map(framesSurvived, 120, 4000, 0.006, 0.024);
-      if (obsOnScreen < 2 && framesSurvived > 120 && p.random() < spawnChance) {
+      const spawnChance = p.map(framesSurvived, 60, 2200, 0.018, 0.05);
+      if (obsOnScreen < 3 && framesSurvived > 60 && p.random() < spawnChance) {
         spawnObstacle();
       }
     }
@@ -829,9 +885,9 @@ new p5(function(p) {
       }
     }
     if (!inZone && !tuatara.inBurrow) {
-      if (temp > TEMP_SAFE_HI)      temp -= 0.03;
-      else if (temp < TEMP_SAFE_LO) temp -= 0.015;
-      else                           temp += 0.004;
+      if (temp > TEMP_SAFE_HI)      temp -= 0.017;
+      else if (temp < TEMP_SAFE_LO) temp -= 0.026;
+      else                           temp += 0.007;
     }
     temp = p.constrain(temp, TEMP_MIN, TEMP_MAX);
 
@@ -895,7 +951,7 @@ new p5(function(p) {
     const type  = p.random(types);
     const laneA = Math.floor(p.random(0, LANE_COUNT));
     const laneB = Math.min(laneA + Math.floor(p.random(1, 3)), LANE_COUNT - 1);
-    const rates = { sun: 0.055, dappled: 0.018, shade: -0.022, deepshade: -0.04 };
+    const rates = { sun: 0.075, dappled: 0.022, shade: -0.028, deepshade: -0.055 };
     zones.push({
       type, x: startX,
       w: p.random(110, 260) * scaleX,
@@ -907,7 +963,7 @@ new p5(function(p) {
 
   function spawnObstacle() {
     const lane  = Math.floor(p.random(0, LANE_COUNT));
-    const type  = framesSurvived > 1800
+    const type  = framesSurvived > 900
       ? p.random(['rat','rat','rat','rat','stoat','cat'])
       : p.random(['rat','rat','rat','rat','stoat']);
     const ow    = Math.round(36 * sc);

@@ -13,10 +13,18 @@ const {
   ATTACK_RANGE,
   MAX_ATTACK_COOLDOWN,
   OBSTACLE_TRAVEL_TICKS,
-  OBSTACLE_WARMUP_TICKS,
-  OBSTACLE_MAX_CONCURRENT,
-  OBSTACLE_CAT_UNLOCK_TICKS
+  OBSTACLE_WARMUP_TICKS: OBSTACLE_WARMUP_TICKS_BASE,
+  OBSTACLE_MAX_CONCURRENT: OBSTACLE_MAX_CONCURRENT_BASE,
+  OBSTACLE_CAT_UNLOCK_TICKS: OBSTACLE_CAT_UNLOCK_TICKS_BASE
 } = require('./constants');
+
+// ── Hazard density tuning ───────────────────────────────────────────
+// Bumped up from the constants.js defaults so multiplayer matches feel
+// busier: hazards start earlier, more can be active at once, and
+// stoats/cats show up sooner instead of just rats.
+const OBSTACLE_WARMUP_TICKS = Math.min(OBSTACLE_WARMUP_TICKS_BASE, 60);
+const OBSTACLE_MAX_CONCURRENT = Math.max(OBSTACLE_MAX_CONCURRENT_BASE, 6);
+const OBSTACLE_CAT_UNLOCK_TICKS = Math.min(OBSTACLE_CAT_UNLOCK_TICKS_BASE, 1200);
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -128,7 +136,7 @@ class Match {
         };
         return acc;
       }, {}),
-      obstacles: this.getPublicObstacles().slice(-1)
+      obstacles: this.getPublicObstacles()
     });
   }
 
@@ -239,9 +247,9 @@ class Match {
 
     // Spawn probability ramps up the longer the match runs, mirroring the
     // single-player difficulty curve (mapped from framesSurvived there).
-    const rampTicks = 4000; // matches single-player's ramp window in frames
+    const rampTicks = 2400; // reach max density faster than before (was 4000)
     const t = clamp((this.frame - OBSTACLE_WARMUP_TICKS) / rampTicks, 0, 1);
-    const spawnChance = 0.015 + t * 0.03; // ~0.015 -> 0.045 per tick
+    const spawnChance = 0.03 + t * 0.06; // ~0.03 -> 0.09 per tick (was 0.015 -> 0.045)
 
     if (Math.random() >= spawnChance) return;
 
@@ -369,7 +377,7 @@ class Match {
         };
         return acc;
       }, {}),
-      obstacles: this.getPublicObstacles().slice(-2)
+      obstacles: this.getPublicObstacles()
     };
     this.broadcast('state', state);
   }
