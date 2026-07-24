@@ -275,6 +275,21 @@ button:active { transform: scale(0.96); }
   margin-top: 8px;
 }
 
+#mp-stats-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  align-items: center;
+  margin-top: 8px;
+  color: var(--text-main);
+  font-size: 0.9rem;
+}
+
+#mp-ping {
+  color: var(--sand);
+  font-weight: 700;
+}
+
 #mp-mode-picker button {
   flex: 1 1 0;
   padding: 10px 14px;

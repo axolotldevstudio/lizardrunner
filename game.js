@@ -66,10 +66,20 @@ new p5(function(p) {
     return { label: 'Very High', icon: '🔴', color: [225, 80, 70] };
   }
 
+  function refreshMultiplayerPingUi() {
+    const pingEl = document.getElementById('mp-ping');
+    if (!pingEl) return;
+    const pingValue = mpPingStatus === 'connected' ? `${mpLatency || mpPingAverage || 0} ms` : (mpPingStatus === 'connecting' ? '--' : 'DISCONNECTED');
+    const quality = getPingQuality(mpLatency || mpPingAverage || 0);
+    pingEl.textContent = `Ping: ${pingValue} ${quality.icon}`;
+    pingEl.style.color = quality.color ? `rgb(${quality.color.join(', ')})` : '';
+  }
+
   function updatePingMeasurement(latency, reason = 'sample') {
     if (!Number.isFinite(latency) || latency < 0) {
       mpLatency = 0;
       mpPingStatus = 'disconnected';
+      refreshMultiplayerPingUi();
       return;
     }
 
@@ -80,6 +90,7 @@ new p5(function(p) {
     mpPingAverage = Math.round(total / mpPingSamples.length);
     mpPingHighest = Math.max(...mpPingSamples);
     mpPingStatus = 'connected';
+    refreshMultiplayerPingUi();
 
     if (mpPingDebugEnabled && (reason !== 'sample' || mpPingSamples.length % 5 === 0)) {
       console.debug('[PING]', { reason, ping: mpLatency, average: mpPingAverage, highest: mpPingHighest, status: mpPingStatus });
@@ -144,16 +155,19 @@ new p5(function(p) {
         mpPingAverage = 0;
         mpPingHighest = 0;
         mpLatency = 0;
+        refreshMultiplayerPingUi();
         if (mpPingDebugEnabled) console.debug('[PING] connected');
       });
       socket.on('disconnect', () => {
         mpPingStatus = 'disconnected';
         mpLatency = 0;
+        refreshMultiplayerPingUi();
         if (mpPingDebugEnabled) console.debug('[PING] disconnected');
       });
       socket.on('connect_error', () => {
         mpPingStatus = 'disconnected';
         mpLatency = 0;
+        refreshMultiplayerPingUi();
         if (mpPingDebugEnabled) console.debug('[PING] connection error');
       });
       mpPingTimer = setInterval(() => {
@@ -178,6 +192,7 @@ new p5(function(p) {
       mpPingSamples = [];
       mpPingAverage = 0;
       mpPingHighest = 0;
+      refreshMultiplayerPingUi();
       multiplayerMode = true;
       multiplayerRunning = true;
       bindMultiplayerDiagnostics();
@@ -198,11 +213,12 @@ new p5(function(p) {
       Object.entries(incomingPlayers).forEach(([id, pl]) => {
         if (!pl) return;
         const prev = mpPlayerStateHistory[id] || null;
+        const incomingLane = Number(pl.lane ?? prev?.serverLane ?? 1);
         const next = {
-          lane: Number(pl.lane ?? 1),
-          serverLane: Number(pl.lane ?? 1),
-          y: prev?.y ?? laneY(Number(pl.lane ?? 1)),
-          targetLane: Number(pl.lane ?? 1),
+          lane: incomingLane,
+          serverLane: incomingLane,
+          y: prev?.y ?? laneY(incomingLane),
+          targetLane: incomingLane,
           receivedAt: now,
           frame: snapshotTime,
           alive: pl.alive !== false,
@@ -210,7 +226,7 @@ new p5(function(p) {
         };
         if (prev) {
           next.y = prev.y;
-          next.targetLane = Number(pl.lane ?? prev.serverLane ?? 1);
+          next.targetLane = incomingLane;
         }
         mpPlayerStateHistory[id] = next;
       });
@@ -262,6 +278,9 @@ new p5(function(p) {
       mpPlayers = {};
       mpObstacles = [];
       mpPredatorAlert = '';
+      mpPingStatus = 'disconnected';
+      mpLatency = 0;
+      refreshMultiplayerPingUi();
       if (mpPingTimer) {
         clearInterval(mpPingTimer);
         mpPingTimer = null;
@@ -393,7 +412,7 @@ new p5(function(p) {
       const state = mpPlayerStateHistory[id] || null;
       const serverLane = Math.max(0, Math.min(LANE_COUNT - 1, Number(pl.lane ?? state?.serverLane ?? 1)));
       const baseLane = Number(state?.lane ?? serverLane);
-      const age = Math.max(0, Math.min(1, (performance.now() - (state?.receivedAt || performance.now())) / 80));
+      const age = Math.max(0, Math.min(1, (performance.now() - (state?.receivedAt || performance.now())) / 110));
       const blend = 1 - Math.pow(1 - age, 2);
       const lane = Math.max(0, Math.min(LANE_COUNT - 1, state ? baseLane + (serverLane - baseLane) * blend : serverLane));
       const baseY = laneY(lane);
@@ -441,8 +460,8 @@ new p5(function(p) {
       const lane = Math.max(0, Math.min(LANE_COUNT - 1, o.lane ?? 0));
       const progress = Math.max(0, Math.min(1, o.progress ?? 0));
       const cy = laneY(lane) + Math.round(11 * sc); // vertical center of lane sprite
-      const cx = p.lerp(W + 30 * scaleX, localX, progress * 0.96 + 0.02);
-      const bob = Math.sin(p.frameCount * 0.08 + lane * 0.35) * 1.2 * s;
+      const cx = p.lerp(W + 30 * scaleX, localX, Math.min(1, progress * 0.9 + 0.05));
+      const bob = Math.sin(p.frameCount * 0.05 + lane * 0.35) * 0.8 * s;
 
       p.noStroke();
       if (o.type === 'rat') {
@@ -532,13 +551,16 @@ new p5(function(p) {
     if (multiplayerRunning) {
       const desiredLane = tuatara.visualLane ?? tuatara.predictedLane ?? tuatara.serverLane ?? tuatara.lane ?? 1;
       const clampedLane = Math.max(0, Math.min(LANE_COUNT - 1, desiredLane));
+      const laneDelta = clampedLane - (tuatara.visualLane ?? tuatara.predictedLane ?? tuatara.lane ?? 1);
       tuatara.visualLane = clampedLane;
       tuatara.predictedLane = clampedLane;
       tuatara.lane = clampedLane;
-      tuatara.targetY = laneY(clampedLane);
+      if (Math.abs(laneDelta) > 0.001) {
+        tuatara.targetY = laneY(clampedLane);
+      }
     }
 
-    tuatara.y += (tuatara.targetY - tuatara.y) * (multiplayerRunning ? 0.32 : 0.18);
+    tuatara.y += (tuatara.targetY - tuatara.y) * (multiplayerRunning ? 0.48 : 0.22);
 
     if (tuatara.burrowCooldown > 0) tuatara.burrowCooldown--;
     if (keys[' '] && tuatara.burrowCooldown === 0 && !tuatara.inBurrow) {
@@ -971,17 +993,6 @@ new p5(function(p) {
     p.fill(fillCol); p.textSize(Math.max(9, Math.round(11*fs))); p.textAlign(p.RIGHT);
     p.text(temp.toFixed(1)+'°C', bx+bw, labelY);
 
-    if (multiplayerRunning) {
-      const pingValue = mpPingStatus === 'connected' ? `${mpLatency || mpPingAverage || 0} ms` : (mpPingStatus === 'connecting' ? '--' : 'DISCONNECTED');
-      const quality = getPingQuality(mpLatency || mpPingAverage || 0);
-      p.textAlign(p.RIGHT);
-      p.fill(195,190,165); p.textSize(Math.max(8, Math.round(9*fs)));
-      p.text('PING', W - Math.round(12*scaleX), Math.round(54*scaleY));
-      p.fill(quality.color[0], quality.color[1], quality.color[2]); p.textSize(Math.max(8, Math.round(9*fs)));
-      p.text(`${pingValue} ${quality.icon}`, W - Math.round(12*scaleX), Math.round(68*scaleY));
-      p.fill(195,190,165,180); p.textSize(Math.max(7, Math.round(8*fs)));
-      p.text(`${mpServerTickRate}Hz`, W - Math.round(12*scaleX), Math.round(82*scaleY));
-    }
 
     const ebx = bx;
     const eby = Math.round(40*scaleY);
@@ -1137,6 +1148,7 @@ new p5(function(p) {
         tuatara.predictedLane = targetLane;
         tuatara.lane = targetLane;
         tuatara.targetY = laneY(targetLane);
+        tuatara.y = p.lerp(tuatara.y, tuatara.targetY, 0.75);
         const payload = { type: 'lane', lane: targetLane, seq: ++tuatara.inputSeq, ts: performance.now() };
         console.log('[GAME] emit input', payload);
         window.multiplayer.socket.emit('input', payload);
@@ -1147,6 +1159,7 @@ new p5(function(p) {
         tuatara.predictedLane = targetLane;
         tuatara.lane = targetLane;
         tuatara.targetY = laneY(targetLane);
+        tuatara.y = p.lerp(tuatara.y, tuatara.targetY, 0.75);
         const payload = { type: 'lane', lane: targetLane, seq: ++tuatara.inputSeq, ts: performance.now() };
         console.log('[GAME] emit input', payload);
         window.multiplayer.socket.emit('input', payload);

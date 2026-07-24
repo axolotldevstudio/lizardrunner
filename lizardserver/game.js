@@ -33,7 +33,7 @@ class Match {
     this.id = `match_${Math.random().toString(36).slice(2, 10)}`;
     this.state = 'waiting';
     this.tickRate = 1000 / TICK_MS;
-    this.broadcastFrequency = Math.max(2, Math.round(120 / TICK_MS));
+    this.broadcastFrequency = Math.max(3, Math.round(180 / TICK_MS));
     this.mapSeed = Math.floor(Math.random() * 1e9);
     this.onFinished = onFinished;
 
@@ -115,8 +115,8 @@ class Match {
         acc[p.id] = p.getPublicState();
         return acc;
       }, {}),
-      obstacles: this.getPublicObstacles(),
-      zones: this.getPublicZones()
+      obstacles: this.getPublicObstacles().slice(-6),
+      zones: this.getPublicZones().slice(-4)
     });
   }
 
@@ -343,8 +343,8 @@ class Match {
         acc[player.id] = player.getPublicState();
         return acc;
       }, {}),
-      obstacles: this.getPublicObstacles(),
-      zones: this.getPublicZones()
+      obstacles: this.getPublicObstacles().slice(-6),
+      zones: this.getPublicZones().slice(-4)
     };
     this.broadcast('state', state);
   }
