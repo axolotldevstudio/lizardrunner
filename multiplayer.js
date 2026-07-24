@@ -94,14 +94,18 @@ async function connectMultiplayer() {
       })();
     } else if (window.serverManager && typeof window.serverManager.connectToBestServer === 'function') {
       setStatus('Selecting best multiplayer server...');
-      const region = await window.serverManager.findBestServer();
-      if (!region) {
+      try {
+        connectResult = await window.serverManager.connectToBestServer(authPayload);
+      } catch (err) {
         setStatus('No multiplayer servers available', 'error');
         logMultiplayer('No available multiplayer servers');
         return;
       }
-      setStatus('Connecting to ' + region + ' server...');
-      connectResult = await window.serverManager.connectToServer(region, authPayload);
+      if (!connectResult?.socket) {
+        setStatus('No multiplayer servers available', 'error');
+        logMultiplayer('No available multiplayer servers');
+        return;
+      }
     } else {
       setStatus('Multiplayer config missing', 'error');
       return;

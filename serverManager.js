@@ -15,6 +15,7 @@
 
   const DEFAULT_HEALTH_PATH = '/health';
   const HEALTH_TIMEOUT_MS = 4000;
+  const CONNECT_TIMEOUT_MS = 6000;
   const RECHECK_FAILED_MS = 45000; // 45s
 
   const state = {
@@ -168,7 +169,7 @@
           socket.off('connect_error', onError);
           try { socket.disconnect(); } catch(e) {}
           reject(new Error('connect_timeout'));
-        }, 8000);
+        }, CONNECT_TIMEOUT_MS);
 
         // Clear timeout on settle
         Promise.resolve().then(() => {
@@ -183,8 +184,24 @@
 
   async function connectToBestServer(authPayload = {}) {
     const best = await findBestServer();
-    if (!best) throw new Error('no_available_servers');
-    return connectToServer(best, authPayload);
+    if (best) {
+      return connectToServer(best, authPayload);
+    }
+
+    const regions = Object.keys(state.servers);
+    for (const region of regions) {
+      const info = state.servers[region];
+      if (!info || !info.url) continue;
+      try {
+        const result = await connectToServer(region, authPayload);
+        return result;
+      } catch (err) {
+        state.servers[region].status = 'UNAVAILABLE';
+        state.servers[region].lastFailure = Date.now();
+      }
+    }
+
+    throw new Error('no_available_servers');
   }
 
   async function attemptFailover(oldSocket, authPayload = {}) {
