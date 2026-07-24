@@ -57,8 +57,50 @@ const STORE_ITEMS = {
       desc: 'Earn 2× scales per run',
       detail: 'Every scale you collect is worth double at the end of the run. The single fastest way to grind the store — weak defensively, but it pays for itself quickly.',
       tips: 'Buy this first if you\'re saving up for expensive items. Focus on scale-dense routes to maximise the multiplier.' },
-  ]
+  ],
+
+  // ── Premium (real-money) items ─────────────────────────────────────
+  // priceNZD is a display dollar amount. The actual charge amount lives in
+  // Stripe (see functions/premiumStore.js) — never trust the client for price.
+  premiumSkins: [
+    { id: 'p_pirate_skin',  name: 'Buccaneer',      icon: '🏴‍☠️', price: 349,  priceNZD: 3.49, premium: true, slot: 'skin',
+      body: [30,60,45],  belly: [60,100,80],  fx: 'embers',
+      desc: 'Weathered sea-green scales with a scorched edge' },
+    { id: 'p_obsidian',     name: 'Obsidian King',  icon: '⚫',    price: 349,  priceNZD: 3.49, premium: true, slot: 'skin',
+      body: [18,18,22],  belly: [150,20,20],  fx: 'embers',
+      desc: 'Black armour scales with crimson veins' },
+    { id: 'p_aurora',       name: 'Aurora',         icon: '🌈',    price: 399,  priceNZD: 3.99, premium: true, slot: 'skin',
+      body: [130,70,190], belly: [190,140,255], fx: 'rainbow',
+      desc: 'Colour-shifting rainbow scales that never repeat' },
+    { id: 'p_golden_tuatara', name: 'Golden Tuatara', icon: '🦎✨', price: 499, priceNZD: 4.99, premium: true, slot: 'skin',
+      body: [212,175,55], belly: [255,223,120], fx: 'shimmer',
+      desc: 'Shimmering legendary gold — an NZ icon reborn' },
+    { id: 'p_galaxy',       name: 'Galaxy',         icon: '🌌',    price: 599,  priceNZD: 5.99, premium: true, slot: 'skin',
+      body: [15,10,40],  belly: [80,60,160],  fx: 'starfield',
+      desc: 'A living starfield swirls across your scales' },
+    { id: 'p_ancient_dragon', name: 'Ancient Dragon', icon: '🐲',  price: 999,  priceNZD: 9.99, premium: true, slot: 'skin',
+      body: [140,20,20], belly: [220,80,30],  fx: 'embers', special: 'horns',
+      desc: 'Massive curved horns and molten dragon scales — the ultimate flex' },
+  ],
+  premiumHats: [
+    { id: 'p_wizard',       name: 'Wizard Hat',    icon: '🧙', price: 249, priceNZD: 2.49, premium: true, slot: 'hat', type: 'wizard',
+      desc: 'Arcane pointed hat, crackling with magic' },
+    { id: 'p_pirate_hat',   name: 'Pirate Hat',    icon: '🏴', price: 249, priceNZD: 2.49, premium: true, slot: 'hat', type: 'pirate',
+      desc: 'Ahoy, matey' },
+    { id: 'p_diamondcrown', name: 'Diamond Crown', icon: '💎', price: 299, priceNZD: 2.99, premium: true, slot: 'hat', type: 'diamondcrown',
+      desc: 'Sparkling, faceted, blinding' },
+    { id: 'p_dragonhelm',   name: 'Dragon Helm',   icon: '🐉', price: 399, priceNZD: 3.99, premium: true, slot: 'hat', type: 'dragonhelm',
+      desc: 'Fearsome horned helm forged in fire' },
+  ],
 };
+
+// Combined premium catalog, used by the "premium" tab and by any lookup
+// that needs to search across both regular and premium items.
+STORE_ITEMS.premium = [...STORE_ITEMS.premiumSkins, ...STORE_ITEMS.premiumHats];
+
+function getAllSkins()  { return [...STORE_ITEMS.skins,  ...STORE_ITEMS.premiumSkins]; }
+function getAllHats()   { return [...STORE_ITEMS.hats,   ...STORE_ITEMS.premiumHats]; }
+function getAllTrails() { return [...STORE_ITEMS.trails]; }
 
 // ── Persistence ─────────────────────────────────────────────────────
 function saveData() {
@@ -102,9 +144,28 @@ function loadData() {
   });
 }
 
+// Called after a Stripe checkout redirects back with ?success=true, and on
+// normal login, to pull any server-granted paidOwned items into the local
+// owned set. Assumes a window.fbLoadUserData() hook exists (mirrors the
+// existing window.fbSaveUserData) that resolves with { owned: [...] } merged
+// from both freeOwned and paidOwned on the backend.
+async function refreshOwnedFromServer() {
+  if (!window.fbLoadUserData) return;
+  try {
+    const data = await window.fbLoadUserData();
+    if (data && Array.isArray(data.owned)) {
+      data.owned.forEach(id => window.LR.owned.add(id));
+      saveData();
+    }
+  } catch (err) {
+    console.error('[STORE] refreshOwnedFromServer failed', err);
+  }
+}
+
 // ── Store UI ────────────────────────────────────────────────────────
 let currentTab = 'skins';
 let previewSelected = null; // id of item being previewed
+let previewOverride = {};  // { skin, hat, trail } — temporary preview picks, reset on tab change
 
 function openStore() {
   if (!window.CONFIG?.ENABLE_STORE) {
@@ -114,9 +175,17 @@ function openStore() {
   document.getElementById('start-screen').classList.add('hidden');
   document.getElementById('gameover-screen').classList.add('hidden');
   updateScalesDisplay();
+  previewOverride = {};
   renderTab(currentTab);
-  schedulePreview(window.LR.equipped.skin);
+  schedulePreview();
   console.log('[STORE] openStore', { currentTab, equipped: window.LR.equipped });
+
+  // If we just came back from a successful Stripe checkout, pull the
+  // freshly-unlocked item(s) down from the server.
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('success') === 'true') {
+    refreshOwnedFromServer().then(() => renderTab(currentTab));
+  }
 }
 
 function closeStore(fromGameover) {
@@ -137,26 +206,32 @@ function updateScalesDisplay() {
 
 function renderTab(tab) {
   currentTab = tab;
+  previewOverride = {};
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   const items  = STORE_ITEMS[tab];
   const grid   = document.getElementById('store-grid');
   grid.innerHTML = '';
 
   items.forEach(item => {
+    const slot     = itemSlot(tab, item);
     const owned    = window.LR.owned.has(item.id);
-    const equipped = window.LR.equipped[tabToSlot(tab)] === item.id;
+    const equipped = window.LR.equipped[slot] === item.id;
     const card     = document.createElement('div');
-    card.className = 'store-card' + (equipped ? ' equipped' : '');
+    card.className = 'store-card' + (equipped ? ' equipped' : '') + (item.premium ? ' premium-card' : '');
     card.dataset.id = item.id;
 
     let badgeHTML = '';
-    if (equipped)   badgeHTML = '<span class="card-badge equipped-badge">Equipped</span>';
-    else if (owned) badgeHTML = '<span class="card-badge owned">Owned</span>';
+    if (equipped)          badgeHTML = '<span class="card-badge equipped-badge">Equipped</span>';
+    else if (owned)        badgeHTML = '<span class="card-badge owned">Owned</span>';
+    else if (item.premium) badgeHTML = '<span class="card-badge premium-badge">💎 PREMIUM</span>';
 
     card.innerHTML = `
       <div class="card-icon">${item.icon}</div>
       <div class="card-name">${item.name}</div>
-      ${!owned ? `<div class="card-price">🦎 ${item.price}</div>` : ''}
+      ${!owned ? (item.premium
+          ? `<div class="card-price premium-price">$${item.priceNZD.toFixed(2)} NZD</div>`
+          : `<div class="card-price">🦎 ${item.price}</div>`)
+        : ''}
       ${badgeHTML}
     `;
     card.addEventListener('click', () => selectStoreItem(tab, item));
@@ -165,9 +240,10 @@ function renderTab(tab) {
 }
 
 function selectStoreItem(tab, item) {
+  const slot = itemSlot(tab, item);
   previewSelected = { tab, item };
   document.getElementById('preview-name').textContent = item.name;
-  console.log('[STORE] selectStoreItem', { tab, itemId: item.id, itemName: item.name });
+  console.log('[STORE] selectStoreItem', { tab, itemId: item.id, itemName: item.name, slot });
   document.querySelectorAll('.store-card').forEach(c => {
     c.classList.toggle('selected', c.dataset.id === item.id);
   });
@@ -180,7 +256,7 @@ function selectStoreItem(tab, item) {
 
   // Show action button
   const owned    = window.LR.owned.has(item.id);
-  const equipped = window.LR.equipped[tabToSlot(tab)] === item.id;
+  const equipped = window.LR.equipped[slot] === item.id;
 
   const btn = document.createElement('button');
   btn.className = 'store-action';
@@ -190,6 +266,10 @@ function selectStoreItem(tab, item) {
   } else if (owned) {
     btn.textContent = 'Equip';
     btn.addEventListener('click', () => equipItem(tab, item));
+  } else if (item.premium) {
+    btn.textContent = `💳 Buy — $${item.priceNZD.toFixed(2)} NZD`;
+    btn.classList.add('premium-buy');
+    btn.addEventListener('click', () => buyPremiumItem(item));
   } else if (window.LR.scales >= item.price) {
     btn.textContent = `Buy — 🦎 ${item.price}`;
     btn.addEventListener('click', () => buyItem(tab, item));
@@ -222,9 +302,11 @@ function selectStoreItem(tab, item) {
     document.getElementById('store-preview').appendChild(panel);
   }
 
-  if (tab === 'skins') schedulePreview(item.id);
-  else schedulePreview(window.LR.equipped.skin);
-} 
+  // Preview: whichever slot this item belongs to gets a live override,
+  // regardless of which tab we're browsing (fixes hats/trails not previewing).
+  previewOverride[slot] = item.id;
+  schedulePreview();
+}
 
 function buyItem(tab, item) {
   if (window.LR.scales < item.price) return;
@@ -236,31 +318,73 @@ function buyItem(tab, item) {
   equipItem(tab, item);
 }
 
+// Kicks off a Stripe Checkout session for a premium (real-money) item.
+// Requires window.fbCreateCheckoutSession — a Firebase callable function,
+// see functions/premiumStore.js — that verifies the item, creates the
+// Checkout session server-side, and returns { url }.
+async function buyPremiumItem(item) {
+  if (!window.fbCreateCheckoutSession) {
+    alert('Sign in required to buy premium items.');
+    return;
+  }
+  const btn = document.querySelector('.store-action');
+  try {
+    if (btn) { btn.disabled = true; btn.textContent = 'Redirecting to checkout…'; }
+    const result = await window.fbCreateCheckoutSession({ cosmeticId: item.id });
+    if (!result || !result.url) throw new Error('No checkout url returned');
+    window.location.href = result.url;
+  } catch (err) {
+    console.error('[STORE] buyPremiumItem failed', err);
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.add('premium-buy');
+      btn.textContent = `💳 Buy — $${item.priceNZD.toFixed(2)} NZD`;
+    }
+    alert('Something went wrong starting checkout. Please try again.');
+  }
+}
+
 function equipItem(tab, item) {
-  console.log('[STORE] equipItem', { tab, itemId: item.id });
-  window.LR.equipped[tabToSlot(tab)] = item.id;
+  const slot = itemSlot(tab, item);
+  console.log('[STORE] equipItem', { tab, itemId: item.id, slot });
+  window.LR.equipped[slot] = item.id;
+  delete previewOverride[slot];
   saveData();
   renderTab(tab);
   selectStoreItem(tab, item);
 }
 
+// Regular tabs map 1:1 to a slot; the combined "premium" tab holds a mix
+// of skins and hats, so each premium item carries its own `slot`.
 function tabToSlot(tab) {
   return { skins: 'skin', trails: 'trail', hats: 'hat', powerups: 'powerup' }[tab];
 }
+function itemSlot(tab, item) {
+  return item.slot || tabToSlot(tab);
+}
 
 // ── Preview canvas renderer (vanilla canvas, not p5) ────────────────
-function schedulePreview(skinId) {
+function schedulePreview() {
   if (window._previewRaf) cancelAnimationFrame(window._previewRaf);
   let frame = 0;
   function loop() {
-    drawPreview(skinId, frame);
+    drawPreview(frame);
     frame++;
     window._previewRaf = requestAnimationFrame(loop);
   }
   loop();
 }
 
-function drawPreview(skinId, frame) {
+function skinBodyColor(skin, frame) {
+  if (skin.fx === 'rainbow') return `hsl(${(frame * 2) % 360}, 70%, 55%)`;
+  return `rgb(${skin.body.join(',')})`;
+}
+function skinBellyColor(skin, frame) {
+  if (skin.fx === 'rainbow') return `hsl(${(frame * 2 + 40) % 360}, 80%, 75%)`;
+  return `rgb(${skin.belly.join(',')})`;
+}
+
+function drawPreview(frame) {
   const cnv = document.getElementById('preview-canvas');
   if (!cnv) return;
   const ctx = cnv.getContext('2d');
@@ -275,9 +399,13 @@ function drawPreview(skinId, frame) {
   ctx.fillStyle = '#2a3e1a';
   ctx.fillRect(0, H * 0.6, W, H * 0.4);
 
-  const skin = STORE_ITEMS.skins.find(s => s.id === skinId) || STORE_ITEMS.skins[0];
-  const hat  = STORE_ITEMS.hats.find(h => h.id === window.LR.equipped.hat) || STORE_ITEMS.hats[0];
-  const trail = STORE_ITEMS.trails.find(t => t.id === window.LR.equipped.trail) || STORE_ITEMS.trails[0];
+  const skinId  = previewOverride.skin  || window.LR.equipped.skin;
+  const hatId   = previewOverride.hat   || window.LR.equipped.hat;
+  const trailId = previewOverride.trail || window.LR.equipped.trail;
+
+  const skin  = getAllSkins().find(s => s.id === skinId)   || getAllSkins()[0];
+  const hat   = getAllHats().find(h => h.id === hatId)     || getAllHats()[0];
+  const trail = getAllTrails().find(t => t.id === trailId) || getAllTrails()[0];
 
   const cx = W / 2, cy = H * 0.55;
   const legOff = Math.sin(frame * 0.18) * 4;
@@ -303,11 +431,12 @@ function drawPreview(skinId, frame) {
   ctx.fill();
   ctx.globalAlpha = 1;
 
-  const [br, bg, bb] = skin.body;
-  const [vr, vg, vb] = skin.belly;
+  const bodyFill  = skinBodyColor(skin, frame);
+  const bellyFill = skinBellyColor(skin, frame);
+  const [br, bg, bb] = skin.body; // used for shading (spines/legs/head tint) even on fx skins
 
   // Tail
-  ctx.fillStyle = `rgb(${br},${bg},${bb})`;
+  ctx.fillStyle = bodyFill;
   ctx.beginPath();
   ctx.moveTo(cx - 22, cy);
   ctx.quadraticCurveTo(cx - 42, cy - 4, cx - 50, cy + 8);
@@ -316,13 +445,13 @@ function drawPreview(skinId, frame) {
   ctx.fill();
 
   // Body
-  ctx.fillStyle = `rgb(${br},${bg},${bb})`;
+  ctx.fillStyle = bodyFill;
   ctx.beginPath();
   ctx.ellipse(cx, cy, 30, 14, 0, 0, Math.PI * 2);
   ctx.fill();
 
   // Belly
-  ctx.fillStyle = `rgb(${vr},${vg},${vb})`;
+  ctx.fillStyle = bellyFill;
   ctx.beginPath();
   ctx.ellipse(cx + 2, cy + 5, 20, 8, 0, 0, Math.PI * 2);
   ctx.fill();
@@ -344,6 +473,23 @@ function drawPreview(skinId, frame) {
   ctx.ellipse(cx + 34, cy - 2, 12, 10, 0, 0, Math.PI * 2);
   ctx.fill();
 
+  // Ancient Dragon horns — curling back from the head
+  if (skin.special === 'horns') {
+    ctx.fillStyle = `rgb(${Math.max(0,br-50)},${Math.max(0,bg-50)},${Math.max(0,bb-50)})`;
+    ctx.beginPath();
+    ctx.moveTo(cx + 30, cy - 9);
+    ctx.quadraticCurveTo(cx + 24, cy - 22, cx + 17, cy - 27);
+    ctx.quadraticCurveTo(cx + 27, cy - 20, cx + 32, cy - 11);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(cx + 39, cy - 9);
+    ctx.quadraticCurveTo(cx + 45, cy - 22, cx + 52, cy - 25);
+    ctx.quadraticCurveTo(cx + 43, cy - 18, cx + 40, cy - 10);
+    ctx.closePath();
+    ctx.fill();
+  }
+
   // Eye
   ctx.fillStyle = '#1a1a0a';
   ctx.beginPath(); ctx.arc(cx + 39, cy - 4, 3, 0, Math.PI * 2); ctx.fill();
@@ -360,8 +506,43 @@ function drawPreview(skinId, frame) {
     ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
   });
 
+  // Premium skin FX (drawn over the body, under the hat)
+  applySkinFX(ctx, skin, cx, cy, frame);
+
   // Hat
   drawHatCanvas(ctx, hat.type, cx + 34, cy - 14, frame);
+}
+
+function applySkinFX(ctx, skin, cx, cy, frame) {
+  if (!skin.fx) return;
+  if (skin.fx === 'shimmer') {
+    for (let i = 0; i < 5; i++) {
+      const ang = frame * 0.05 + i * (Math.PI * 2 / 5);
+      const x = cx + Math.cos(ang) * 32;
+      const y = cy + Math.sin(ang) * 14;
+      ctx.globalAlpha = 0.4 + 0.6 * Math.abs(Math.sin(frame * 0.15 + i));
+      ctx.fillStyle = '#fff8c0';
+      ctx.beginPath(); ctx.arc(x, y, 1.6, 0, Math.PI * 2); ctx.fill();
+    }
+  } else if (skin.fx === 'starfield') {
+    for (let i = 0; i < 8; i++) {
+      const sx = cx - 25 + ((i * 97 + frame * 2) % 50);
+      const sy = cy - 8 + ((i * 53) % 16);
+      ctx.globalAlpha = 0.3 + 0.7 * Math.abs(Math.sin(frame * 0.1 + i * 1.3));
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(sx, sy, 1, 0, Math.PI * 2); ctx.fill();
+    }
+  } else if (skin.fx === 'embers') {
+    for (let i = 0; i < 6; i++) {
+      const t = (frame * 1.3 + i * 23) % 40;
+      const ex = cx - 20 + i * 8 + Math.sin(frame * 0.1 + i) * 3;
+      const ey = cy + 10 - t;
+      ctx.globalAlpha = Math.max(0, 1 - t / 40);
+      ctx.fillStyle = i % 2 === 0 ? '#ff8c30' : '#ffcf60';
+      ctx.beginPath(); ctx.arc(ex, ey, 1.5, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  ctx.globalAlpha = 1;
 }
 
 function drawHatCanvas(ctx, type, hx, hy, frame) {
@@ -406,6 +587,46 @@ function drawHatCanvas(ctx, type, hx, hy, frame) {
     ctx.strokeStyle = `rgba(255,240,100,${pulse})`;
     ctx.lineWidth = 3;
     ctx.beginPath(); ctx.ellipse(hx, hy-14, 12, 5, 0, 0, Math.PI*2); ctx.stroke();
+  } else if (type === 'wizard') {
+    ctx.fillStyle = '#4b2e83';
+    ctx.beginPath();
+    ctx.moveTo(hx-11,hy+5); ctx.lineTo(hx+3,hy-22); ctx.lineTo(hx+11,hy+2);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ffd700';
+    ctx.beginPath(); ctx.arc(hx+3, hy-22, 2.5, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = `rgba(180,140,255,${0.5 + 0.3*Math.sin(frame*0.2)})`;
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(hx+3, hy-10, 10 + Math.sin(frame*0.2)*2, 0, Math.PI*2); ctx.stroke();
+  } else if (type === 'pirate') {
+    ctx.fillStyle = '#1a1a1a';
+    ctx.beginPath();
+    ctx.moveTo(hx-14,hy+2); ctx.quadraticCurveTo(hx,hy-14,hx+14,hy+2);
+    ctx.quadraticCurveTo(hx,hy+8,hx-14,hy+2);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(hx, hy-4, 1.8, 0, Math.PI*2); ctx.fill();
+  } else if (type === 'diamondcrown') {
+    ctx.fillStyle = '#cfe8ff';
+    ctx.beginPath();
+    ctx.moveTo(hx-11,hy+4); ctx.lineTo(hx-6,hy-14); ctx.lineTo(hx,hy-4);
+    ctx.lineTo(hx+6,hy-14); ctx.lineTo(hx+11,hy+4);
+    ctx.closePath(); ctx.fill();
+    ctx.globalAlpha = 0.5 + 0.5*Math.abs(Math.sin(frame*0.2));
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.arc(hx, hy-8, 1.8, 0, Math.PI*2); ctx.fill();
+    ctx.globalAlpha = 1;
+  } else if (type === 'dragonhelm') {
+    ctx.fillStyle = '#3a1a1a';
+    ctx.fillRect(hx-9, hy-10, 18, 14);
+    ctx.fillStyle = '#8a1a1a';
+    ctx.beginPath();
+    ctx.moveTo(hx-9,hy-8); ctx.quadraticCurveTo(hx-16,hy-18,hx-18,hy-24);
+    ctx.quadraticCurveTo(hx-10,hy-16,hx-7,hy-10);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(hx+9,hy-8); ctx.quadraticCurveTo(hx+16,hy-18,hx+18,hy-24);
+    ctx.quadraticCurveTo(hx+10,hy-16,hx+7,hy-10);
+    ctx.fill();
   }
   ctx.restore();
 }

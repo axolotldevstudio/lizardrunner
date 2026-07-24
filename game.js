@@ -587,7 +587,7 @@ new p5(function(p) {
       burrowCooldown: 0, burstCooldown: 0,
       jumpCooldown: 0, jumpTimer: 0,
       inBurrow: false, burrowTimer: 0,
-      shieldHits:  powerup === 'scalemail' ? 1 : 0,
+      shieldHits:  powerup === 'scalemail' ? 1 : (powerup === 'ironskin' ? 2 : 0),
       shieldFlash: 0,
       energy: ENERGY_START,
       sprinting: false,
@@ -596,7 +596,8 @@ new p5(function(p) {
       visualLane: 1,
       serverLane: 1,
       inputSeq: 0,
-      lastInputAt: 0
+      lastInputAt: 0,
+      usedSecondWind: false
     };
 
     zones         = [];
@@ -808,9 +809,10 @@ new p5(function(p) {
     if (keys[' '] && tuatara.burrowCooldown === 0 && !tuatara.inBurrow) {
       if (window.CONFIG?.DEBUG) console.debug('[GAME] burrow start', { powerup: eq.powerup });
       const dur = eq.powerup === 'marathon' ? 180 : 90;
+      const cd  = eq.powerup === 'featherlight' ? 100 : 180;
       tuatara.inBurrow       = true;
       tuatara.burrowTimer    = dur;
-      tuatara.burrowCooldown = 180;
+      tuatara.burrowCooldown = cd;
       keys[' ']              = false;
     }
     if (tuatara.inBurrow) {
@@ -825,9 +827,10 @@ new p5(function(p) {
     const burstCD = eq.powerup === 'sprinter' ? 40 : 80;
     if (keys['ArrowRight'] && tuatara.burstCooldown === 0) {
       if (window.CONFIG?.DEBUG) console.debug('[GAME] burst start', { powerup: eq.powerup });
-      burst = 2.5 * scaleX;
+      const cometBurst = eq.powerup === 'cometburst';
+      burst = (cometBurst ? 4.2 : 2.5) * scaleX;
       tuatara.burstCooldown = burstCD;
-      temp += 1.4;
+      temp += cometBurst ? 1.8 : 1.4;
       keys['ArrowRight'] = false;
     }
 
@@ -835,7 +838,8 @@ new p5(function(p) {
       sprinting = true;
     }
     if (sprinting) {
-      tuatara.energy = Math.max(0, tuatara.energy - SPRINT_ENERGY_DRAIN);
+      const drain = eq.powerup === 'adrenaline' ? SPRINT_ENERGY_DRAIN * 0.6 : SPRINT_ENERGY_DRAIN;
+      tuatara.energy = Math.max(0, tuatara.energy - drain);
       temp += 0.02;
     } else {
       tuatara.energy = Math.min(ENERGY_MAX, tuatara.energy + ENERGY_REGEN_RATE);
@@ -867,13 +871,14 @@ new p5(function(p) {
       if (!lastZ || lastZ.x + lastZ.w < W + 80) spawnZone(W + 60);
 
       const obsOnScreen = obstacles.filter(o => o.x > W - 20).length;
-      const spawnChance = p.map(framesSurvived, 60, 2200, 0.018, 0.05);
+      let spawnChance = p.map(framesSurvived, 60, 2200, 0.018, 0.05);
+      if (eq.powerup === 'luckycharm') spawnChance *= 0.7;
       if (obsOnScreen < 3 && framesSurvived > 60 && p.random() < spawnChance) {
         spawnObstacle();
       }
     }
 
-    const heatMult = eq.powerup === 'coolblood' ? 0.75 : 1.0;
+    const heatMult = eq.powerup === 'coolblood' ? 0.75 : (eq.powerup === 'thermalcore' ? 0.85 : 1.0);
     let inZone = false;
     for (let z of zones) {
       const tx = tuatara.x + tuatara.w / 2;
@@ -885,9 +890,14 @@ new p5(function(p) {
       }
     }
     if (!inZone && !tuatara.inBurrow) {
-      if (temp > TEMP_SAFE_HI)      temp -= 0.017;
-      else if (temp < TEMP_SAFE_LO) temp -= 0.026;
-      else                           temp += 0.007;
+      const thermal = eq.powerup === 'thermalcore';
+      const zen     = eq.powerup === 'zenmode';
+      let hotRate = 0.017, coldRate = 0.026, neutralRate = 0.007;
+      if (thermal) { hotRate *= 0.65; coldRate *= 0.65; }
+      if (zen)     { hotRate *= 1.6;  coldRate *= 1.6; }
+      if (temp > TEMP_SAFE_HI)      temp -= hotRate;
+      else if (temp < TEMP_SAFE_LO) temp -= coldRate;
+      else                           temp += neutralRate;
     }
     temp = p.constrain(temp, TEMP_MIN, TEMP_MAX);
 
@@ -1218,6 +1228,18 @@ new p5(function(p) {
       p.noFill();
       p.stroke(255,240,100, 150+p.sin(p.frameCount*0.1)*80);
       p.strokeWeight(3*s); p.ellipse(hx,hy-12*s,22*s,8*s);
+    } else if (type === 'wizard') {
+      p.fill(85,45,150);
+      p.triangle(hx-11*s, hy+3*s, hx+2*s, hy-24*s, hx+9*s, hy+2*s);
+      p.fill(255,215,0);
+      p.ellipse(hx+1*s, hy-16*s, 3*s, 3*s);
+      p.ellipse(hx-4*s, hy-6*s, 2*s, 2*s);
+      p.fill(60,30,110); p.ellipse(hx-1*s, hy+3*s, 22*s, 5*s);
+    } else if (type === 'ninja') {
+      p.fill(20,20,25);
+      p.rect(hx-11*s, hy-2*s, 22*s, 6*s, 2*s);
+      p.triangle(hx+9*s, hy, hx+18*s, hy-4*s, hx+18*s, hy+3*s);
+      p.fill(210,40,40); p.rect(hx-11*s, hy-0.5*s, 22*s, 2*s);
     }
   }
 
@@ -1346,7 +1368,7 @@ new p5(function(p) {
 
     if (shieldActive && tuatara.shieldHits > 0) {
       p.fill(100,180,255); p.textSize(Math.max(8, Math.round(9*fs))); p.textAlign(p.RIGHT);
-      p.text('🛡 SHIELD', rx, Math.round(48*scaleY));
+      p.text('🛡 SHIELD x' + tuatara.shieldHits, rx, Math.round(48*scaleY));
     }
 
     const pu = window.LR.equipped.powerup;
@@ -1361,8 +1383,17 @@ new p5(function(p) {
 
   // ── Death ─────────────────────────────────────────────────────────
   function checkDeath() {
-    if (temp >= TEMP_MAX)      triggerDeath('Too Hot!',  'You overheated in the sun');
-    else if (temp <= TEMP_MIN) triggerDeath('Too Cold!', 'Your body temperature crashed');
+    if (temp >= TEMP_MAX || temp <= TEMP_MIN) {
+      const eq = window.LR.equipped;
+      if (eq.powerup === 'secondwind' && !tuatara.usedSecondWind) {
+        tuatara.usedSecondWind = true;
+        temp = TEMP_START;
+        tuatara.shieldFlash = 40;
+        return;
+      }
+      if (temp >= TEMP_MAX) triggerDeath('Too Hot!',  'You overheated in the sun');
+      else                  triggerDeath('Too Cold!', 'Your body temperature crashed');
+    }
   }
 
   async function triggerDeath(title, reason, mpResult = null) {

@@ -1,0 +1,96 @@
+/* ── Premium (real-money) store additions ─────────────────────────── */
+:root {
+  --premium-gold: #ffd76a;
+  --premium-gold-dark: #ff9d3d;
+  --premium-glow: rgba(255, 215, 100, 0.45);
+}
+
+/* Premium tab stands out from the regular green tabs */
+.tab-btn[data-tab="premium"] {
+  border-color: var(--premium-gold-dark);
+  color: var(--premium-gold);
+  background: rgba(255, 215, 100, 0.08);
+}
+.tab-btn[data-tab="premium"].active {
+  background: linear-gradient(135deg, var(--premium-gold), var(--premium-gold-dark));
+  color: #3a2200;
+  border-color: var(--premium-gold-dark);
+}
+
+/* Premium item cards */
+.store-card.premium-card {
+  border: 1px solid rgba(255, 215, 100, 0.45);
+  box-shadow: 0 0 10px var(--premium-glow);
+  position: relative;
+  overflow: hidden;
+}
+.store-card.premium-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    120deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.12) 45%,
+    transparent 60%
+  );
+  transform: translateX(-100%);
+  animation: premium-sheen 3.2s ease-in-out infinite;
+  pointer-events: none;
+}
+.store-card.premium-card:hover {
+  border-color: var(--premium-gold);
+  box-shadow: 0 0 16px var(--premium-glow);
+}
+.store-card.premium-card.selected {
+  border-color: var(--premium-gold);
+  box-shadow: 0 0 0 2px var(--premium-glow), 0 0 18px var(--premium-glow);
+}
+.store-card.premium-card.equipped {
+  border-color: var(--premium-gold);
+  background: rgba(255, 215, 100, 0.08);
+}
+
+@keyframes premium-sheen {
+  0%   { transform: translateX(-120%); }
+  35%  { transform: translateX(140%); }
+  100% { transform: translateX(140%); }
+}
+
+.card-price.premium-price {
+  color: var(--premium-gold);
+  font-weight: 700;
+}
+
+.card-badge.premium-badge {
+  background: linear-gradient(135deg, var(--premium-gold), var(--premium-gold-dark));
+  color: #3a2200;
+  font-weight: 800;
+  box-shadow: 0 0 8px var(--premium-glow);
+}
+
+/* Premium buy button — distinct gold gradient with a pulse, separate from
+   the amber scale-currency button so real-money purchases read differently */
+.store-action.premium-buy {
+  background: linear-gradient(135deg, var(--premium-gold), var(--premium-gold-dark));
+  color: #3a2200;
+  animation: premium-pulse 2.4s ease-in-out infinite;
+}
+.store-action.premium-buy:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 0 14px var(--premium-glow);
+}
+.store-action.premium-buy:disabled {
+  animation: none;
+}
+
+@keyframes premium-pulse {
+  0%, 100% { box-shadow: 0 0 0 rgba(255,215,100,0); }
+  50%      { box-shadow: 0 0 16px var(--premium-glow); }
+}
+
+.premium-note {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-top: 2px;
+}
