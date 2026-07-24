@@ -112,11 +112,24 @@ class Match {
     player.socket?.emit('state', {
       frame: this.frame,
       players: this.players.reduce((acc, p) => {
-        acc[p.id] = p.getPublicState();
+        acc[p.id] = {
+          id: p.id,
+          lane: p.lane,
+          alive: p.alive,
+          state: p.state,
+          temp: Number(p.temp.toFixed(1)),
+          score: Number(p.score.toFixed(1)),
+          inBurrow: p.inBurrow,
+          jumpTimer: p.jumpTimer || 0,
+          shieldHits: p.shieldHits || 0,
+          energy: Number(p.energy.toFixed(1)),
+          sprinting: !!p.sprinting,
+          pushCooldown: p.pushCooldown || 0,
+          username: p.displayName || `Player_${String(p.id).slice(0,6)}`
+        };
         return acc;
       }, {}),
-      obstacles: this.getPublicObstacles().slice(-6),
-      zones: this.getPublicZones().slice(-4)
+      obstacles: this.getPublicObstacles().slice(-4)
     });
   }
 
@@ -340,11 +353,24 @@ class Match {
     const state = {
       frame: this.frame,
       players: this.players.reduce((acc, player) => {
-        acc[player.id] = player.getPublicState();
+        acc[player.id] = {
+          id: player.id,
+          lane: player.lane,
+          alive: player.alive,
+          state: player.state,
+          temp: Number(player.temp.toFixed(1)),
+          score: Number(player.score.toFixed(1)),
+          inBurrow: player.inBurrow,
+          jumpTimer: player.jumpTimer || 0,
+          shieldHits: player.shieldHits || 0,
+          energy: Number(player.energy.toFixed(1)),
+          sprinting: !!player.sprinting,
+          pushCooldown: player.pushCooldown || 0,
+          username: player.displayName || `Player_${String(player.id).slice(0,6)}`
+        };
         return acc;
       }, {}),
-      obstacles: this.getPublicObstacles().slice(-6),
-      zones: this.getPublicZones().slice(-4)
+      obstacles: this.getPublicObstacles().slice(-4)
     };
     this.broadcast('state', state);
   }

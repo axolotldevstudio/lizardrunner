@@ -35,6 +35,9 @@ let mpPingAverage = 0;
 let mpPingHighest = 0;
 let mpPingStatus = 'disconnected';
 let mpPingDebugEnabled = false;
+let mpStateQueue = [];
+let mpLastStateApplyAt = 0;
+let mpStateApplyIntervalMs = 50;
 
 new p5(function(p) {
 
@@ -192,6 +195,8 @@ new p5(function(p) {
       mpPingSamples = [];
       mpPingAverage = 0;
       mpPingHighest = 0;
+      mpStateQueue = [];
+      mpLastStateApplyAt = performance.now();
       refreshMultiplayerPingUi();
       multiplayerMode = true;
       multiplayerRunning = true;
@@ -202,14 +207,14 @@ new p5(function(p) {
       }, 100);
     };
 
-    window.onMultiplayerState = (state) => {
-      if (!multiplayerRunning) return;
-      mpPlayers = state.players || {};
-      mpObstacles = state.obstacles || [];
-      zones = Array.isArray(state.zones) ? state.zones : [];
+    function applyMultiplayerState(state) {
+      if (!multiplayerRunning || !state) return;
       const now = performance.now();
       const snapshotTime = state.frame ?? now;
-      const incomingPlayers = mpPlayers;
+      const incomingPlayers = state.players || {};
+      mpPlayers = incomingPlayers;
+      mpObstacles = Array.isArray(state.obstacles) ? state.obstacles : [];
+
       Object.entries(incomingPlayers).forEach(([id, pl]) => {
         if (!pl) return;
         const prev = mpPlayerStateHistory[id] || null;
@@ -230,6 +235,7 @@ new p5(function(p) {
         }
         mpPlayerStateHistory[id] = next;
       });
+
       if (mpMyId && mpPlayers[mpMyId] && tuatara) {
         const me = mpPlayers[mpMyId];
         score = Math.floor(me.score || 0);
@@ -245,13 +251,30 @@ new p5(function(p) {
         if (Math.abs((tuatara.predictedLane ?? tuatara.lane ?? 0) - serverLane) <= 1) {
           tuatara.targetY = laneY(tuatara.predictedLane ?? tuatara.lane ?? serverLane);
         }
-        // Sync server-controlled states
         tuatara.inBurrow = !!me.inBurrow;
         tuatara.jumpTimer = Math.max(0, Number(me.jumpTimer || 0));
         tuatara.shieldHits = Number(me.shieldHits || 0);
         tuatara.energy = Number((me.energy ?? ENERGY_START).toFixed(1));
         tuatara.sprinting = !!me.sprinting;
         tuatara.pushCooldown = Number(me.pushCooldown || 0);
+      }
+    }
+
+    function drainMultiplayerStateQueue() {
+      const now = performance.now();
+      if (!multiplayerRunning || mpStateQueue.length === 0) return;
+      if (now - mpLastStateApplyAt < mpStateApplyIntervalMs && mpStateQueue.length < 2) return;
+      const latestState = mpStateQueue[mpStateQueue.length - 1];
+      mpStateQueue.length = 0;
+      mpLastStateApplyAt = now;
+      applyMultiplayerState(latestState);
+    }
+
+    window.onMultiplayerState = (state) => {
+      if (!multiplayerRunning) return;
+      mpStateQueue.push(state);
+      if (mpStateQueue.length > 3) {
+        mpStateQueue.splice(0, mpStateQueue.length - 3);
       }
     };
 
@@ -503,6 +526,7 @@ new p5(function(p) {
     }
 
     if (multiplayerRunning) {
+      drainMultiplayerStateQueue();
       framesSurvived++;
       score = Math.floor(framesSurvived / 60 * 10);
       const hoarder = window.LR.equipped.powerup === 'hoarder';
@@ -564,7 +588,7 @@ new p5(function(p) {
 
     if (tuatara.burrowCooldown > 0) tuatara.burrowCooldown--;
     if (keys[' '] && tuatara.burrowCooldown === 0 && !tuatara.inBurrow) {
-      console.log('[GAME] burrow start', { powerup: eq.powerup });
+      if (window.CONFIG?.DEBUG) console.debug('[GAME] burrow start', { powerup: eq.powerup });
       const dur = eq.powerup === 'marathon' ? 180 : 90;
       tuatara.inBurrow       = true;
       tuatara.burrowTimer    = dur;
@@ -582,7 +606,7 @@ new p5(function(p) {
     if (tuatara.burstCooldown > 0) tuatara.burstCooldown--;
     const burstCD = eq.powerup === 'sprinter' ? 40 : 80;
     if (keys['ArrowRight'] && tuatara.burstCooldown === 0) {
-      console.log('[GAME] burst start', { powerup: eq.powerup });
+      if (window.CONFIG?.DEBUG) console.debug('[GAME] burst start', { powerup: eq.powerup });
       burst = 2.5 * scaleX;
       tuatara.burstCooldown = burstCD;
       temp += 1.4;
@@ -615,16 +639,17 @@ new p5(function(p) {
     const scrollSpeed = (speed + burst) * (sprinting ? SPRINT_SPEED_MULT : 1);
 
     if (!multiplayerRunning) {
-      for (let z of zones)     z.x -= scrollSpeed;
-      for (let o of obstacles) o.x -= scrollSpeed;
-      zones     = zones.filter(z => z.x + z.w > 0);
-      obstacles = obstacles.filter(o => o.x + tuatara.w * 1.5 > 0);
+      const nextScroll = Math.max(2.2 * scaleX, scrollSpeed * 0.95);
+      for (let z of zones)     z.x -= nextScroll;
+      for (let o of obstacles) o.x -= nextScroll;
+      zones     = zones.filter(z => z.x + z.w > -40);
+      obstacles = obstacles.filter(o => o.x + tuatara.w * 1.5 > -40);
 
       const lastZ = zones[zones.length - 1];
       if (!lastZ || lastZ.x + lastZ.w < W + 80) spawnZone(W + 60);
 
       const obsOnScreen = obstacles.filter(o => o.x > W - 20).length;
-      const spawnChance = p.map(framesSurvived, 120, 4000, 0.008, 0.03);
+      const spawnChance = p.map(framesSurvived, 120, 4000, 0.006, 0.024);
       if (obsOnScreen < 2 && framesSurvived > 120 && p.random() < spawnChance) {
         spawnObstacle();
       }
@@ -661,7 +686,11 @@ new p5(function(p) {
       });
     }
 
-    for (let pt of particles) { pt.x += pt.vx; pt.y += pt.vy; pt.life--; }
+    for (let pt of particles) {
+      pt.x += pt.vx * 0.9;
+      pt.y += pt.vy * 0.9;
+      pt.life--;
+    }
     particles = particles.filter(pt => pt.life > 0);
 
     if (tuatara.shieldFlash > 0) tuatara.shieldFlash--;
@@ -742,8 +771,8 @@ new p5(function(p) {
     p.fill(20, 38, 15);
     p.rect(0, 0, W, LANE_TOP);
     p.fill(255, 255, 200, 40);
-    for (let i = 0; i < 12; i++) {
-      const sx = ((i * 137 + framesSurvived * 0.2) % W);
+    for (let i = 0; i < 8; i++) {
+      const sx = ((i * 137 + framesSurvived * 0.14) % W);
       const sy = (i * 53) % (LANE_TOP - 6) + 3;
       p.ellipse(sx, sy, 2, 2);
     }
@@ -1137,7 +1166,7 @@ new p5(function(p) {
   p.keyPressed = function() {
     if (!gameRunning) return;
     const k = p.keyCode;
-    console.log('[GAME] keyPressed', { key: p.key, keyCode: k });
+    if (window.CONFIG?.DEBUG) console.debug('[GAME] keyPressed', { key: p.key, keyCode: k });
     if (multiplayerRunning && window.multiplayer?.socket) {
       const currentLane = Number.isFinite(tuatara?.visualLane)
         ? tuatara.visualLane
@@ -1188,7 +1217,7 @@ new p5(function(p) {
 
   p.keyReleased = function() {
     const k = p.keyCode;
-    console.log('[GAME] keyReleased', { key: p.key, keyCode: k });
+    if (window.CONFIG?.DEBUG) console.debug('[GAME] keyReleased', { key: p.key, keyCode: k });
     if (k===38) keys['ArrowUp']    = false;
     if (k===40) keys['ArrowDown']  = false;
     if (k===39) keys['ArrowRight'] = false;
