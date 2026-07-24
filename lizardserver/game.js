@@ -33,7 +33,7 @@ class Match {
     this.id = `match_${Math.random().toString(36).slice(2, 10)}`;
     this.state = 'waiting';
     this.tickRate = 1000 / TICK_MS;
-    this.broadcastFrequency = Math.max(3, Math.round(180 / TICK_MS));
+    this.broadcastFrequency = Math.max(2, Math.round(120 / TICK_MS));
     this.mapSeed = Math.floor(Math.random() * 1e9);
     this.onFinished = onFinished;
 
@@ -128,7 +128,7 @@ class Match {
         };
         return acc;
       }, {}),
-      obstacles: this.getPublicObstacles().slice(-2)
+      obstacles: this.getPublicObstacles().slice(-1)
     });
   }
 

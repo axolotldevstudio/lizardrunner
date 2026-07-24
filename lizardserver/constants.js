@@ -1,4 +1,4 @@
-const TICK_MS = Number(process.env.SERVER_TICK_MS) || 50; // 20 ticks per second
+const TICK_MS = Number(process.env.SERVER_TICK_MS) || 80; // 12.5 ticks per second for lighter traffic
 // Default to 2 players per match (make PvP quick to test locally)
 const MAX_PLAYERS_PER_MATCH = Number(process.env.MAX_PLAYERS_PER_MATCH) || 2;
 const MAX_LOBBY_PLAYERS = MAX_PLAYERS_PER_MATCH;
